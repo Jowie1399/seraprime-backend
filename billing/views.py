@@ -33,3 +33,18 @@ class ReceiptViewSet(viewsets.ModelViewSet):
         return Receipt.objects.filter(
             invoice__lease__unit__property__owner=self.request.user
         )
+
+from django.http import JsonResponse
+from .tasks import generate_monthly_invoices_for_owner, notify_past_due_invoices
+from django.contrib.auth.decorators import login_required
+
+@login_required
+def trigger_monthly_invoices(request):
+    owner_id = request.user.id
+    count = generate_monthly_invoices_for_owner(owner_id)
+    return JsonResponse({"message": f"{count} invoices generated for this month."})
+
+@login_required
+def trigger_past_due_notifications(request):
+    notify_past_due_invoices()
+    return JsonResponse({"message": "Past-due invoices updated and notifications sent."})
