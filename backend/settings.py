@@ -9,21 +9,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ===============================
 # SECURITY
 # ===============================
-
 SECRET_KEY = config("DJANGO_SECRET_KEY")
-
 DEBUG = config("DEBUG", default=False, cast=bool)
-
-ALLOWED_HOSTS = config(
-    "ALLOWED_HOSTS",
-    default="localhost,127.0.0.1"
-).split(",")
-
+ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="localhost,127.0.0.1").split(",")
 
 # ===============================
 # APPLICATIONS
 # ===============================
-
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -42,11 +34,9 @@ INSTALLED_APPS = [
     "notifications",
 ]
 
-
 # ===============================
 # MIDDLEWARE
 # ===============================
-
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
@@ -58,11 +48,9 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-
 # ===============================
-# ROOT CONFIG
+# URLS & TEMPLATES
 # ===============================
-
 ROOT_URLCONF = "backend.urls"
 
 TEMPLATES = [
@@ -83,11 +71,9 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "backend.wsgi.application"
 
-
 # ===============================
 # DATABASE
 # ===============================
-
 DATABASES = {
     "default": dj_database_url.config(
         default=config("DATABASE_URL", default="sqlite:///db.sqlite3"),
@@ -95,31 +81,24 @@ DATABASES = {
     )
 }
 
-
 # ===============================
-# PASSWORD VALIDATORS
+# PASSWORD VALIDATION
 # ===============================
-
 AUTH_PASSWORD_VALIDATORS = []
-
 
 # ===============================
 # INTERNATIONALIZATION
 # ===============================
-
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Africa/Nairobi"
 USE_I18N = True
 USE_TZ = True
 
-
 # ===============================
-# STATIC FILES
+# STATIC & MEDIA
 # ===============================
-
 STATIC_URL = "/static/"
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
-
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 MEDIA_URL = "/media/"
@@ -127,11 +106,9 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-
 # ===============================
 # REST FRAMEWORK
 # ===============================
-
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -144,21 +121,39 @@ REST_FRAMEWORK = {
     ),
 }
 
-
 # ===============================
 # JWT SETTINGS
 # ===============================
-
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(days=1),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
 }
 
+# ===============================
+# EMAIL BACKEND (Password reset)
+# ===============================
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = config("EMAIL_HOST", default="smtp.gmail.com")
+EMAIL_USE_TLS = True
+EMAIL_PORT = 587
+EMAIL_HOST_USER = config("EMAIL_HOST_USER", default="werejoe94@gmail.com")
+EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD")  # Your app password if using Gmail
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
+# ===============================
+# DJOSER PASSWORD RESET SETTINGS
+# ===============================
+DJOSER = {
+    "USER_ID_FIELD": "id",
+    "LOGIN_FIELD": "email",
+    "PASSWORD_RESET_CONFIRM_URL": "password/reset/confirm/{uid}/{token}",
+    "SEND_ACTIVATION_EMAIL": False,
+    "SERIALIZERS": {},
+}
 
 # ===============================
 # MPESA
 # ===============================
-
 MPESA_ENVIRONMENT = config("MPESA_ENVIRONMENT", default="sandbox")
 MPESA_CONSUMER_KEY = config("MPESA_CONSUMER_KEY")
 MPESA_CONSUMER_SECRET = config("MPESA_CONSUMER_SECRET")

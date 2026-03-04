@@ -1,20 +1,31 @@
-import firebase_admin
-from firebase_admin import credentials
-from django.conf import settings
 import os
+import json
+import firebase_admin
+from firebase_admin import credentials, messaging
+from django.conf import settings
 
-firebase_app = None
+FIREBASE_SERVICE_ACCOUNT = os.getenv("FIREBASE_SERVICE_ACCOUNT")
+
+if not FIREBASE_SERVICE_ACCOUNT:
+    raise ValueError("FIREBASE_SERVICE_ACCOUNT environment variable not set.")
+
+service_account_info = json.loads(FIREBASE_SERVICE_ACCOUNT)
+
+cred = credentials.Certificate(service_account_info)
+
+if not firebase_admin._apps:
+    firebase_admin.initialize_app(cred)
 
 
-def initialize_firebase():
-    global firebase_app
+def send_push_notification(token, title, body, data=None):
+    message = messaging.Message(
+        notification=messaging.Notification(
+            title=title,
+            body=body,
+        ),
+        token=token,
+        data=data or {},
+    )
 
-    if firebase_app:
-        return firebase_app
-
-    cred_path = os.path.join(settings.BASE_DIR, settings.FIREBASE_CREDENTIALS_PATH)
-
-    cred = credentials.Certificate(cred_path)
-    firebase_app = firebase_admin.initialize_app(cred)
-
-    return firebase_app
+    response = messaging.send(message)
+    return response

@@ -1,37 +1,16 @@
-from firebase_admin import messaging
 from .models import DeviceToken
-from .firebase import initialize_firebase
-import logging
-
-logger = logging.getLogger(__name__)
+from .firebase import send_push_notification
 
 
-def send_push_notification(token: str, title: str, body: str):
-    """
-    Send push notification using Firebase Admin SDK.
-    Safe for production.
-    """
+def notify_user_devices(user, title, body):
+    tokens = user.device_tokens.all()
 
-    try:
-        initialize_firebase()
-
-        message = messaging.Message(
-            notification=messaging.Notification(
+    for device in tokens:
+        try:
+            send_push_notification(
+                token=device.token,
                 title=title,
-                body=body,
-            ),
-            token=token,
-        )
-
-        response = messaging.send(message)
-        return response
-
-    except Exception as e:
-        logger.error(f"Push notification failed: {str(e)}")
-
-
-def notify_user_devices(user, title: str, body: str):
-    devices = DeviceToken.objects.filter(user=user)
-
-    for device in devices:
-        send_push_notification(device.token, title, body)
+                body=body
+            )
+        except Exception:
+            pass

@@ -2,6 +2,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from .models import DeviceToken
+from .serializers import DeviceTokenSerializer
 
 
 @api_view(["POST"])
@@ -12,12 +13,9 @@ def register_device_token(request):
     if not token:
         return Response({"error": "Token required"}, status=400)
 
-    # Prevent duplicate tokens for different users
-    DeviceToken.objects.filter(token=token).exclude(user=request.user).delete()
-
-    DeviceToken.objects.get_or_create(
-        user=request.user,
-        token=token
+    DeviceToken.objects.update_or_create(
+        token=token,
+        defaults={"user": request.user}
     )
 
-    return Response({"message": "Device registered successfully"})
+    return Response({"message": "Device registered"})
