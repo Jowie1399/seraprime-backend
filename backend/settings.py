@@ -32,7 +32,8 @@ INSTALLED_APPS = [
     "billing",
     "mpesa",
     "notifications",
-]
+    "analytics",
+] 
 
 # ===============================
 # MIDDLEWARE
