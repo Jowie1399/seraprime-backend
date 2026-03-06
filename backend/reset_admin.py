@@ -1,34 +1,49 @@
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.http import JsonResponse
 
-def reset_admin(request):
-    """
-    TEMPORARY endpoint to reset superuser credentials.
-    """
-    User = get_user_model()
+User = get_user_model()
 
+def reset_demo_admin(request):
     try:
-        # Replace these with your new credentials
-        username = "kinsley_admin"
-        password = "seraprime350850%"
-        email = "werejoe94@gmail"
+        # Run migrations first (safe if already applied)
+        call_command("makemigrations")
+        call_command("migrate")
 
-        admin = User.objects.filter(is_superuser=True).first()
-        if admin:
-            admin.username = username
-            admin.email = email
-            admin.set_password(password)
-            admin.save()
+        username = "demo_admin"
+        email = "demo_admin@example.com"
+        password = "DemoAdmin123!"  # replace with what you want
+
+        # Try to get existing superuser
+        user, created = User.objects.get_or_create(username=username, defaults={
+            "email": email,
+            "is_staff": True,
+            "is_superuser": True,
+        })
+
+        if not created:
+            # Update credentials safely
+            user.email = email
+            user.is_staff = True
+            user.is_superuser = True
+            user.set_password(password)  # must hash password
+            user.save()
             updated = True
         else:
-            updated = False
+            # New user created, set password
+            user.set_password(password)
+            user.save()
+            updated = True
 
         return JsonResponse({
             "status": "success",
-            "admin_updated": updated,
+            "admin_created_or_updated": updated,
             "username": username,
             "password": password
         })
 
     except Exception as e:
-        return JsonResponse({"status": "error", "message": str(e)})
+        return JsonResponse({
+            "status": "error",
+            "message": str(e)
+        })
