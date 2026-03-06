@@ -10,9 +10,9 @@ def reset_demo_admin(request):
         call_command("makemigrations")
         call_command("migrate")
 
-        username = "demo_admin"
-        email = "demo_admin@example.com"
-        password = "DemoAdmin123!"  # replace with what you want
+        username = "kinsley_admin"
+        email = "werejoe94@gmail.com"
+        password = "#Seraprime350850%"  # replace with what you want
 
         # Try to get existing superuser
         user, created = User.objects.get_or_create(username=username, defaults={
