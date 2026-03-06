@@ -6,7 +6,8 @@ from properties.views import PropertyViewSet, UnitViewSet, TenantViewSet, LeaseV
 from billing.views import InvoiceViewSet, ReceiptViewSet
 from properties.views import DashboardView
 from mpesa.views import MpesaTransactionViewSet
-from backend.create_admin import create_admin
+from backend.setup_demo_admin import setup_demo_admin
+
 
 
 router = DefaultRouter()
@@ -21,7 +22,7 @@ router.register(r"mpesa-transactions", MpesaTransactionViewSet, basename="mpesa-
 urlpatterns = [
     path("admin/", admin.site.urls),
     
-    path('create-admin/', create_admin),
+    path("setup-demo-admin/", setup_demo_admin),  # TEMPORARY endpoint
 
     # Auth
     path("auth/", include("djoser.urls")),
