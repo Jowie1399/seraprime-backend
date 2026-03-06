@@ -6,15 +6,15 @@ User = get_user_model()
 
 def reset_demo_admin(request):
     try:
-        # Run migrations first (safe if already applied)
+        # Run migrations in case they weren't applied
         call_command("makemigrations")
         call_command("migrate")
 
+        # <-- SET THE CORRECT SUPERUSER CREDENTIALS HERE -->
         username = "kinsley_admin"
         email = "werejoe94@gmail.com"
-        password = "#Seraprime350850%"  # replace with what you want
+        password = "#Seraprime350850%"
 
-        # Try to get existing superuser
         user, created = User.objects.get_or_create(username=username, defaults={
             "email": email,
             "is_staff": True,
@@ -22,15 +22,13 @@ def reset_demo_admin(request):
         })
 
         if not created:
-            # Update credentials safely
             user.email = email
             user.is_staff = True
             user.is_superuser = True
-            user.set_password(password)  # must hash password
+            user.set_password(password)  # Important: hashes the password
             user.save()
             updated = True
         else:
-            # New user created, set password
             user.set_password(password)
             user.save()
             updated = True
