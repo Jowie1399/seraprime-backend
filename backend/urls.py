@@ -7,6 +7,7 @@ from billing.views import InvoiceViewSet, ReceiptViewSet
 from properties.views import DashboardView
 from mpesa.views import MpesaTransactionViewSet
 from backend.reset_admin import reset_admin
+from backend.run_migrations import migrate
 
 
 router = DefaultRouter()
@@ -20,7 +21,7 @@ router.register(r"mpesa-transactions", MpesaTransactionViewSet, basename="mpesa-
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    
+    path("run-migrations/", migrate),  # TEMP endpoint
     path("reset-demo-admin/", reset_admin),  # TEMP endpoint
     # Auth
     path("auth/", include("djoser.urls")),
