@@ -1,53 +1,58 @@
-# mpesa/views.py
-
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.decorators import api_view, permission_classes, authentication_classes, action
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, viewsets
+
+from django.db import transaction, IntegrityError
+
 import json
 
 from .models import MpesaTransaction
 from .services import process_transaction
-from rest_framework.decorators import action
-from rest_framework.response import Response
+from .serializers import MpesaTransactionSerializer
 from billing.models import Invoice
-
 
 
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([AllowAny])
 def mpesa_confirmation(request):
-    print("\n🔥🔥🔥 C2B CONFIRMATION RECEIVED 🔥🔥🔥")
-    print("DATA:", json.dumps(request.data, indent=2))
-    print("🔥🔥🔥 END 🔥🔥🔥\n")
+
+    print("\n🔥 C2B CONFIRMATION RECEIVED 🔥")
+    print(json.dumps(request.data, indent=2))
+
+    receipt = request.data.get("TransID")
+    amount = request.data.get("TransAmount")
+    phone = request.data.get("MSISDN")
+    account_ref = request.data.get("BillRefNumber")
+
+    if not receipt:
+        return Response({"ResultCode": 1, "ResultDesc": "Invalid receipt"})
 
     try:
-        receipt = request.data.get("TransID")
-        amount = request.data.get("TransAmount")
-        phone = request.data.get("MSISDN")
-        account_ref = request.data.get("BillRefNumber")
 
-        # Prevent duplicates
-        if MpesaTransaction.objects.filter(receipt_number=receipt).exists():
-            return Response({"ResultCode": 0, "ResultDesc": "Duplicate ignored"})
+        with transaction.atomic():
 
-        transaction = MpesaTransaction.objects.create(
-            receipt_number=receipt,
-            phone_number=phone,
-            amount=amount,
-            account_reference=account_ref,
-            raw_payload=request.data
-        )
+            transaction_obj = MpesaTransaction.objects.create(
+                receipt_number=receipt,
+                phone_number=phone,
+                amount=amount,
+                account_reference=account_ref,
+                raw_payload=request.data,
+            )
 
-        process_transaction(transaction)
+        process_transaction(transaction_obj)
+
+    except IntegrityError:
+        # duplicate receipt
+        return Response({"ResultCode": 0, "ResultDesc": "Duplicate ignored"})
 
     except Exception as e:
         print("❌ ERROR:", str(e))
 
     return Response(
         {"ResultCode": 0, "ResultDesc": "Confirmation received"},
-        status=status.HTTP_200_OK
+        status=status.HTTP_200_OK,
     )
 
 
@@ -55,55 +60,82 @@ def mpesa_confirmation(request):
 @authentication_classes([])
 @permission_classes([AllowAny])
 def mpesa_validation(request):
-    print("\n🟡 VALIDATION REQUEST:", request.data, "\n")
+
+    print("\n🟡 VALIDATION REQUEST:", request.data)
 
     return Response(
         {"ResultCode": 0, "ResultDesc": "Accepted"},
-        status=status.HTTP_200_OK
+        status=status.HTTP_200_OK,
     )
-    
-from rest_framework import viewsets
-from rest_framework.permissions import IsAuthenticated
-from .serializers import MpesaTransactionSerializer
 
 
 class MpesaTransactionViewSet(viewsets.ModelViewSet):
+
     serializer_class = MpesaTransactionSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+
         return MpesaTransaction.objects.filter(
             property__owner=self.request.user
-        ).order_by("-created_at")
-        
-     
-
-@action(detail=True, methods=["post"])
-def manually_allocate(self, request, pk=None):
-    transaction = self.get_object()
-
-    if transaction.is_matched:
-        return Response({"error": "Already matched."}, status=400)
-
-    invoice_id = request.data.get("invoice_id")
-
-    try:
-        invoice = Invoice.objects.get(
-            id=invoice_id,
-            lease__unit__property__owner=request.user
+        ).select_related(
+            "property",
+            "unit",
+            "tenant",
+            "invoice"
         )
-    except Invoice.DoesNotExist:
-        return Response({"error": "Invalid invoice."}, status=400)
 
-    # Apply payment
-    invoice.apply_payment(transaction.amount)
+    def perform_create(self, serializer):
+        """
+        Used for Import Past Mpesa payments
+        """
 
-    transaction.invoice = invoice
-    transaction.tenant = invoice.lease.tenant
-    transaction.unit = invoice.lease.unit
-    transaction.property = invoice.lease.unit.property
-    transaction.is_matched = True
-    transaction.is_processed = True
-    transaction.save()
+        transaction_obj = serializer.save()
 
-    return Response({"message": "Payment manually allocated successfully."})
+        process_transaction(transaction_obj)
+
+    @action(detail=True, methods=["post"])
+    def manually_allocate(self, request, pk=None):
+
+        with transaction.atomic():
+
+            transaction_obj = MpesaTransaction.objects.select_for_update().get(pk=pk)
+
+            if transaction_obj.is_matched:
+                return Response(
+                    {"error": "Transaction already matched."},
+                    status=400
+                )
+
+            invoice_id = request.data.get("invoice_id")
+
+            try:
+
+                invoice = Invoice.objects.select_for_update().get(
+                    id=invoice_id,
+                    lease__unit__property__owner=request.user
+                )
+
+            except Invoice.DoesNotExist:
+
+                return Response(
+                    {"error": "Invalid invoice."},
+                    status=400
+                )
+
+            # apply payment safely
+            invoice.apply_payment(transaction_obj.amount)
+
+            transaction_obj.invoice = invoice
+            transaction_obj.tenant = invoice.lease.tenant
+            transaction_obj.unit = invoice.lease.unit
+            transaction_obj.property = invoice.lease.unit.property
+
+            transaction_obj.is_matched = True
+            transaction_obj.is_processed = True
+
+            transaction_obj.save()
+
+        return Response(
+            {"message": "Payment allocated successfully"}
+        )

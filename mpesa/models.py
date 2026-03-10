@@ -2,12 +2,28 @@ from django.db import models
 from properties.models import Property, Unit, Tenant
 from billing.models import Invoice
 
+
 class MpesaTransaction(models.Model):
-    receipt_number = models.CharField(max_length=50, unique=True)
+
+    receipt_number = models.CharField(
+        max_length=50,
+        unique=True,
+        db_index=True
+    )
+
     phone_number = models.CharField(max_length=20)
-    amount = models.DecimalField(max_digits=12, decimal_places=2)
+
+    amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2
+    )
+
     account_reference = models.CharField(max_length=100)
-    transaction_date = models.DateTimeField(null=True, blank=True)
+
+    transaction_date = models.DateTimeField(
+        null=True,
+        blank=True
+    )
 
     property = models.ForeignKey(
         Property,
@@ -38,11 +54,15 @@ class MpesaTransaction(models.Model):
     )
 
     is_processed = models.BooleanField(default=False)
+
     is_matched = models.BooleanField(default=False)
 
-    raw_payload = models.JSONField()
+    raw_payload = models.JSONField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        ordering = ["-created_at"]
+
     def __str__(self):
-        return f"{self.receipt_number} - {self.amount}"
+        return f"{self.receipt_number} - KES {self.amount}"

@@ -1,11 +1,11 @@
+# billing/views.py
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from .models import Invoice, Receipt
 from .serializers import InvoiceSerializer, ReceiptSerializer
-from .tasks import generate_monthly_invoices_for_owner
-
+from .tasks import generate_monthly_invoices_for_owner, notify_past_due_invoices
 
 class InvoiceViewSet(viewsets.ModelViewSet):
     serializer_class = InvoiceSerializer
@@ -24,7 +24,6 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             "invoices_created": count
         })
 
-
 class ReceiptViewSet(viewsets.ModelViewSet):
     serializer_class = ReceiptSerializer
     permission_classes = [IsAuthenticated]
@@ -34,14 +33,13 @@ class ReceiptViewSet(viewsets.ModelViewSet):
             invoice__lease__unit__property__owner=self.request.user
         )
 
+# For your SettingsScreen buttons
 from django.http import JsonResponse
-from .tasks import generate_monthly_invoices_for_owner, notify_past_due_invoices
 from django.contrib.auth.decorators import login_required
 
 @login_required
 def trigger_monthly_invoices(request):
-    owner_id = request.user.id
-    count = generate_monthly_invoices_for_owner(owner_id)
+    count = generate_monthly_invoices_for_owner(request.user)
     return JsonResponse({"message": f"{count} invoices generated for this month."})
 
 @login_required
