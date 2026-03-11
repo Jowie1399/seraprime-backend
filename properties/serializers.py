@@ -32,7 +32,7 @@ class TenantSerializer(serializers.ModelSerializer):
 class LeaseSerializer(serializers.ModelSerializer):
     tenant_name = serializers.CharField(source="tenant.full_name", read_only=True)
     unit_name = serializers.CharField(source="unit.name", read_only=True)
-    
+
     class Meta:
         model = Lease
         fields = "__all__"

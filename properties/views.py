@@ -2,18 +2,16 @@ from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.exceptions import ValidationError
+from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.db.models import Sum
+from rest_framework.views import APIView
 
 from .models import Property, Unit, Tenant, Lease
 from .serializers import PropertySerializer, UnitSerializer, TenantSerializer, LeaseSerializer
-from billing.models import Invoice
-from rest_framework.decorators import action
-from django.utils import timezone
-from rest_framework.response import Response
-from rest_framework.exceptions import ValidationError
+from billing.models import Invoice, Receipt
+
 
 class PropertyViewSet(viewsets.ModelViewSet):
     serializer_class = PropertySerializer
@@ -73,25 +71,18 @@ class TenantViewSet(viewsets.ModelViewSet):
             "tenant": tenant.full_name,
             "total_arrears": tenant.total_arrears()
         })
-    
+
     @action(detail=True, methods=["post"])
     def move_out(self, request, pk=None):
-
         tenant = self.get_object()
-
         if not tenant.is_active:
             raise ValidationError("Tenant already moved out.")
 
         lease = tenant.leases.filter(is_active=True).first()
-
         if not lease:
             raise ValidationError("No active lease found.")
 
-        move_date = request.data.get("move_out_date")
-
-        if not move_date:
-            move_date = timezone.now().date()
-
+        move_date = request.data.get("move_out_date") or timezone.now().date()
         lease.end_lease(move_date)
 
         tenant.is_active = False
@@ -105,12 +96,6 @@ class TenantViewSet(viewsets.ModelViewSet):
             "move_out_date": move_date
         })
 
-# views.py
-from rest_framework import viewsets
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import ValidationError
-from .models import Lease
-from .serializers import LeaseSerializer
 
 class LeaseViewSet(viewsets.ModelViewSet):
     serializer_class = LeaseSerializer
@@ -136,7 +121,7 @@ class LeaseViewSet(viewsets.ModelViewSet):
 
         lease = serializer.save()
 
-        # Update old unit occupancy if moved
+        # Update occupancy
         if old_lease.unit != new_unit:
             if not Lease.objects.filter(unit=old_lease.unit, is_active=True).exists():
                 old_lease.unit.is_occupied = False
@@ -152,67 +137,34 @@ class LeaseViewSet(viewsets.ModelViewSet):
             unit.save()
 
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from django.db.models import Sum
-from django.utils import timezone
-
-from .models import Property, Unit, Tenant, Lease
-from billing.models import Invoice, Receipt
-
-
 class DashboardView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-
         user = request.user
-
-        # Properties owned by user
         properties = Property.objects.filter(owner=user)
-
         property_count = properties.count()
-
-        # Units belonging to these properties
         units = Unit.objects.filter(property__in=properties)
-
         total_units = units.count()
         occupied_units = units.filter(is_occupied=True).count()
-
-        # Tenants
         tenants = Tenant.objects.filter(property__in=properties, is_active=True)
         tenant_count = tenants.count()
-
-        # Active leases
         leases = Lease.objects.filter(unit__in=units, is_active=True)
 
-        # Expected rent this month
-        expected_rent = leases.aggregate(
-            total=Sum("rent_amount")
-        )["total"] or 0
-
-        # Collected this month
+        expected_rent = leases.aggregate(total=Sum("rent_amount"))["total"] or 0
         now = timezone.now()
-
         collected = Receipt.objects.filter(
             invoice__lease__unit__in=units,
             payment_date__year=now.year,
             payment_date__month=now.month
         ).aggregate(total=Sum("amount_paid"))["total"] or 0
 
-        # Total arrears
         unpaid_invoices = Invoice.objects.filter(
             lease__unit__in=units,
             status__in=["unpaid", "partial", "past_due"]
         )
-
         arrears = sum(inv.balance() for inv in unpaid_invoices)
-
-        # Occupancy rate
-        occupancy_rate = 0
-        if total_units > 0:
-            occupancy_rate = round((occupied_units / total_units) * 100, 2)
+        occupancy_rate = round((occupied_units / total_units) * 100, 2) if total_units > 0 else 0
 
         data = {
             "properties": property_count,
@@ -222,5 +174,4 @@ class DashboardView(APIView):
             "total_arrears": arrears,
             "occupancy_rate_percent": occupancy_rate,
         }
-
-        return Response(data)            
+        return Response(data)

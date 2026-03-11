@@ -1,5 +1,7 @@
 from django.db import models
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 User = get_user_model()
 
@@ -31,9 +33,7 @@ class Tenant(models.Model):
     full_name = models.CharField(max_length=255)
     phone = models.CharField(max_length=20, db_index=True)
     national_id = models.CharField(max_length=20, blank=True, null=True, db_index=True)
-
     wallet_balance = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-
     is_active = models.BooleanField(default=True)
     move_out_date = models.DateField(blank=True, null=True)
 
@@ -44,22 +44,15 @@ class Tenant(models.Model):
             lease__tenant=self,
             status__in=["unpaid", "partial", "past_due"]
         )
-
         return sum(inv.balance() for inv in invoices)
 
     def __str__(self):
         return self.full_name
 
 
-# models.py
-from django.db import models
-from django.core.exceptions import ValidationError
-from django.utils import timezone
-
 class Lease(models.Model):
-    unit = models.ForeignKey("Unit", on_delete=models.CASCADE, related_name="leases")
-    tenant = models.ForeignKey("Tenant", on_delete=models.CASCADE, related_name="leases")
-
+    unit = models.ForeignKey(Unit, on_delete=models.CASCADE, related_name="leases")
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="leases")
     rent_amount = models.DecimalField(max_digits=12, decimal_places=2)
     start_date = models.DateField()
     end_date = models.DateField(blank=True, null=True)
@@ -75,7 +68,6 @@ class Lease(models.Model):
         ]
 
     def save(self, *args, **kwargs):
-        # Ensure only one active lease per unit in Python as well
         if self.is_active:
             existing = Lease.objects.filter(unit=self.unit, is_active=True)
             if self.pk:
@@ -83,8 +75,6 @@ class Lease(models.Model):
             if existing.exists():
                 raise ValidationError("This unit already has an active lease.")
         super().save(*args, **kwargs)
-
-        # Keep unit occupancy in sync
         self.unit.is_occupied = self.is_active
         self.unit.save()
 
@@ -93,7 +83,7 @@ class Lease(models.Model):
             date = timezone.now().date()
         self.is_active = False
         self.end_date = date
-        self.save()  # will also mark unit as not occupied
+        self.save()
 
     def __str__(self):
         return f"{self.tenant.full_name} - {self.unit.name} ({'Active' if self.is_active else 'Inactive'})"
