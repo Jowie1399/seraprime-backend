@@ -1,7 +1,5 @@
 import re
-
 from django.db import transaction
-
 from properties.models import Property, Unit
 from billing.models import Invoice
 from .models import MpesaTransaction
@@ -10,78 +8,70 @@ from .models import MpesaTransaction
 def normalize_reference(reference: str):
     if not reference:
         return ""
-    return re.sub(r"\s+", "", reference.upper())
+    return re.sub(r"\s+", "", str(reference).upper())
 
 
 def normalize_unit(unit: str):
-    """
-    Removes symbols like - or _ from unit names.
-    Example:
-    101-A1 -> A1
-    101_A1 -> A1
-    """
     if not unit:
         return ""
-    return re.sub(r"[^A-Z0-9]", "", unit.upper())
+    return re.sub(r"[^A-Z0-9]", "", str(unit).upper())
 
 
-def process_transaction(transaction: MpesaTransaction, notify_landlady=True):
-
-    # Lock transaction row so multiple workers cannot process it at the same time
+def process_transaction(transaction_obj: MpesaTransaction, notify_landlady=True):
     with transaction.atomic():
-
-        transaction = (
+        transaction_locked = (
             MpesaTransaction.objects
             .select_for_update()
-            .get(id=transaction.id)
+            .select_related("property", "unit", "tenant", "invoice")
+            .get(id=transaction_obj.id)
         )
 
-        if transaction.is_processed:
-            return
+        if transaction_locked.is_processed:
+            return transaction_locked
 
-        ref = normalize_reference(transaction.account_reference)
-
+        ref = normalize_reference(transaction_locked.account_reference)
         match = re.match(r"(\d+)(.*)", ref)
 
         if not match:
-            transaction.is_processed = True
-            transaction.save(update_fields=["is_processed"])
-            return
+            transaction_locked.is_processed = True
+            transaction_locked.save(update_fields=["is_processed"])
+            return transaction_locked
 
         property_number = match.group(1)
         unit_part = normalize_unit(match.group(2))
 
-        # SAFER property lookup
         property_obj = Property.objects.filter(
             property_number=property_number
         ).first()
 
         if not property_obj:
-            transaction.is_processed = True
-            transaction.save(update_fields=["is_processed"])
-            return
+            transaction_locked.is_processed = True
+            transaction_locked.save(update_fields=["is_processed"])
+            return transaction_locked
 
-        transaction.property = property_obj
+        transaction_locked.property = property_obj
 
         if unit_part:
-
             unit_obj = Unit.objects.filter(
                 property=property_obj,
-                name=unit_part
+                name__iexact=unit_part
             ).first()
 
+            if not unit_obj:
+                normalized_units = Unit.objects.filter(property=property_obj)
+                for u in normalized_units:
+                    if normalize_unit(u.name) == unit_part:
+                        unit_obj = u
+                        break
+
             if unit_obj:
+                transaction_locked.unit = unit_obj
 
-                transaction.unit = unit_obj
+                lease = unit_obj.leases.filter(is_active=True).select_related("tenant").first()
 
-                lease = getattr(unit_obj, "lease", None)
+                if lease:
+                    transaction_locked.tenant = lease.tenant
 
-                if lease and lease.is_active:
-
-                    tenant = lease.tenant
-                    transaction.tenant = tenant
-
-                    # LOCK invoice row to prevent race conditions
                     invoice = (
                         Invoice.objects
                         .select_for_update()
@@ -89,26 +79,25 @@ def process_transaction(transaction: MpesaTransaction, notify_landlady=True):
                             lease=lease,
                             status__in=["unpaid", "partial", "past_due"]
                         )
-                        .order_by("due_date")
+                        .order_by("due_date", "created_at")
                         .first()
                     )
 
-                    if invoice and not transaction.is_matched:
+                    if invoice and not transaction_locked.is_matched:
+                        invoice.apply_payment(transaction_locked.amount)
+                        transaction_locked.invoice = invoice
+                        transaction_locked.is_matched = True
 
-                        invoice.apply_payment(transaction.amount)
-
-                        transaction.invoice = invoice
-                        transaction.is_matched = True
-
-        transaction.is_processed = True
-
-        transaction.save(
+        transaction_locked.is_processed = True
+        transaction_locked.save(
             update_fields=[
                 "property",
                 "unit",
                 "tenant",
                 "invoice",
                 "is_matched",
-                "is_processed"
+                "is_processed",
             ]
         )
+
+        return transaction_locked

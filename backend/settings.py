@@ -57,7 +57,7 @@ ROOT_URLCONF = "backend.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -162,9 +162,12 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 DJOSER = {
     "USER_ID_FIELD": "id",
     "LOGIN_FIELD": "email",
-    "PASSWORD_RESET_CONFIRM_URL": "password/reset/confirm/{uid}/{token}",
+    "PASSWORD_RESET_CONFIRM_URL": "reset-password-confirm/{uid}/{token}",
     "SEND_ACTIVATION_EMAIL": False,
     "SERIALIZERS": {},
+    "EMAIL": {
+        "password_reset": "backend.email.MobilePasswordResetEmail",
+    },
 }
 
 # ===============================

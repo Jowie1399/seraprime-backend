@@ -2,12 +2,9 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from properties.views import PropertyViewSet, UnitViewSet, TenantViewSet, LeaseViewSet
+from properties.views import PropertyViewSet, UnitViewSet, TenantViewSet, LeaseViewSet, DashboardView
 from billing.views import InvoiceViewSet, ReceiptViewSet
-from properties.views import DashboardView
 from mpesa.views import MpesaTransactionViewSet
-
-
 
 router = DefaultRouter()
 router.register(r"properties", PropertyViewSet, basename="property")
@@ -20,7 +17,7 @@ router.register(r"mpesa-transactions", MpesaTransactionViewSet, basename="mpesa-
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    
+
     # Auth
     path("auth/", include("djoser.urls")),
     path("auth/", include("djoser.urls.jwt")),
@@ -31,7 +28,7 @@ urlpatterns = [
     # Dashboard
     path("api/dashboard/", DashboardView.as_view()),
 
-    # M-Pesa
+    # M-Pesa callbacks
     path("api/payments/", include("mpesa.urls")),
 
     # Notifications

@@ -1,8 +1,14 @@
-from .models import DeviceToken
-from .firebase import send_push_notification
+from .models import DeviceToken, Notification
+from .expo import send_push_notification
 
 
-def notify_user_devices(user, title, body):
+def notify_user_devices(user, title, body, data=None):
+    notification = Notification.objects.create(
+        user=user,
+        title=title,
+        message=body,
+    )
+
     tokens = user.device_tokens.all()
 
     for device in tokens:
@@ -10,7 +16,11 @@ def notify_user_devices(user, title, body):
             send_push_notification(
                 token=device.token,
                 title=title,
-                body=body
+                body=body,
+                data=data or {"notification_id": str(notification.id)},
             )
         except Exception:
+            # optional: delete invalid token here if needed
             pass
+
+    return notification

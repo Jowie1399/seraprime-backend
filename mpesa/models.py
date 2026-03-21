@@ -4,22 +4,17 @@ from billing.models import Invoice
 
 
 class MpesaTransaction(models.Model):
-
     receipt_number = models.CharField(
         max_length=50,
         unique=True,
         db_index=True
     )
-
     phone_number = models.CharField(max_length=20)
-
     amount = models.DecimalField(
         max_digits=12,
         decimal_places=2
     )
-
     account_reference = models.CharField(max_length=100)
-
     transaction_date = models.DateTimeField(
         null=True,
         blank=True
@@ -30,34 +25,32 @@ class MpesaTransaction(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        unique=True
+        related_name="mpesa_transactions"
     )
-
     unit = models.ForeignKey(
         Unit,
         on_delete=models.SET_NULL,
         null=True,
-        blank=True
+        blank=True,
+        related_name="mpesa_transactions"
     )
-
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.SET_NULL,
         null=True,
-        blank=True
+        blank=True,
+        related_name="mpesa_transactions"
     )
-
     invoice = models.ForeignKey(
         Invoice,
         on_delete=models.SET_NULL,
         null=True,
-        blank=True
+        blank=True,
+        related_name="mpesa_transactions"
     )
 
     is_processed = models.BooleanField(default=False)
-
     is_matched = models.BooleanField(default=False)
-
     raw_payload = models.JSONField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

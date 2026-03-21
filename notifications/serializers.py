@@ -3,7 +3,6 @@ from .models import DeviceToken, Notification
 
 
 class DeviceTokenSerializer(serializers.ModelSerializer):
-
     class Meta:
         model = DeviceToken
         fields = "__all__"
@@ -11,7 +10,6 @@ class DeviceTokenSerializer(serializers.ModelSerializer):
 
 
 class NotificationSerializer(serializers.ModelSerializer):
-
     class Meta:
         model = Notification
         fields = "__all__"

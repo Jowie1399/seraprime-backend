@@ -1,34 +1,120 @@
-# analytics/views.py
+from decimal import Decimal
+
+from django.db.models import Sum, Count, Q
+from django.db.models.functions import TruncMonth
+from django.utils.dateparse import parse_date
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from django.db.models import Sum, Count
-from django.db.models.functions import TruncMonth
-from billing.models import Invoice
-from properties.models import Unit, Property
-from django.utils.dateparse import parse_date
+
+from billing.models import Invoice, Receipt
+from properties.models import Unit, Property, Tenant, Lease
+
+
+def _filter_by_owner(queryset, request, property_lookup="property__owner"):
+    user = request.user
+    if user and user.is_authenticated:
+        return queryset.filter(**{property_lookup: user})
+    return queryset.none()
+
+
+def _safe_date(value):
+    if not value:
+        return None
+    return parse_date(value)
+
+
+def _apply_invoice_filters(qs, request):
+    start_date = _safe_date(request.GET.get("start_date"))
+    end_date = _safe_date(request.GET.get("end_date"))
+    property_number = request.GET.get("property_number")
+
+    qs = _filter_by_owner(qs, request, "lease__unit__property__owner")
+
+    if property_number:
+        qs = qs.filter(lease__unit__property__property_number=property_number)
+    if start_date:
+        qs = qs.filter(created_at__date__gte=start_date)
+    if end_date:
+        qs = qs.filter(created_at__date__lte=end_date)
+
+    return qs
+
+
+def _apply_receipt_filters(qs, request):
+    start_date = _safe_date(request.GET.get("start_date"))
+    end_date = _safe_date(request.GET.get("end_date"))
+    property_number = request.GET.get("property_number")
+
+    qs = _filter_by_owner(qs, request, "invoice__lease__unit__property__owner")
+
+    if property_number:
+        qs = qs.filter(invoice__lease__unit__property__property_number=property_number)
+    if start_date:
+        qs = qs.filter(payment_date__date__gte=start_date)
+    if end_date:
+        qs = qs.filter(payment_date__date__lte=end_date)
+
+    return qs
+
+
+def _apply_unit_filters(qs, request):
+    property_number = request.GET.get("property_number")
+
+    qs = _filter_by_owner(qs, request, "property__owner")
+
+    if property_number:
+        qs = qs.filter(property__property_number=property_number)
+
+    return qs
+
+
+def _apply_property_filters(qs, request):
+    user = request.user
+    if user and user.is_authenticated:
+        qs = qs.filter(owner=user)
+    else:
+        qs = qs.none()
+
+    property_number = request.GET.get("property_number")
+    if property_number:
+        qs = qs.filter(property_number=property_number)
+
+    return qs
+
+
+def _apply_tenant_filters(qs, request):
+    property_number = request.GET.get("property_number")
+
+    qs = _filter_by_owner(qs, request, "property__owner")
+
+    if property_number:
+        qs = qs.filter(property__property_number=property_number)
+
+    return qs
+
+
+@api_view(["GET"])
+def property_list(request):
+    properties = _apply_property_filters(Property.objects.all(), request).order_by("name", "property_number")
+    data = [
+        {
+            "id": prop.id,
+            "property_number": prop.property_number,
+            "name": prop.name,
+            "location": prop.location,
+            "label": f"{prop.property_number} - {prop.name}",
+        }
+        for prop in properties
+    ]
+    return Response(data)
 
 
 @api_view(["GET"])
 def rent_trend(request):
     """
-    Returns rent collected grouped by month.
-    Optional filters:
-        start_date=YYYY-MM-DD
-        end_date=YYYY-MM-DD
-        property_number=<property_number>
+    Billed rent trend grouped by invoice created month.
     """
-    start_date = request.GET.get("start_date")
-    end_date = request.GET.get("end_date")
-    property_number = request.GET.get("property_number")
-
-    invoices = Invoice.objects.all()
-
-    if property_number:
-        invoices = invoices.filter(lease__unit__property__property_number=property_number)
-    if start_date:
-        invoices = invoices.filter(created_at__date__gte=parse_date(start_date))
-    if end_date:
-        invoices = invoices.filter(created_at__date__lte=parse_date(end_date))
+    invoices = _apply_invoice_filters(Invoice.objects.all(), request)
 
     qs = (
         invoices
@@ -39,8 +125,37 @@ def rent_trend(request):
     )
 
     data = [
-        {"month": i["month"].strftime("%b"), "total": i["total"] or 0}
-        for i in qs
+        {
+            "month": item["month"].strftime("%b %Y"),
+            "total": float(item["total"] or 0),
+        }
+        for item in qs if item["month"]
+    ]
+
+    return Response(data)
+
+
+@api_view(["GET"])
+def receipts_trend(request):
+    """
+    Actual money collected grouped by receipt payment month.
+    """
+    receipts = _apply_receipt_filters(Receipt.objects.all(), request)
+
+    qs = (
+        receipts
+        .annotate(month=TruncMonth("payment_date"))
+        .values("month")
+        .annotate(total=Sum("amount_paid"))
+        .order_by("month")
+    )
+
+    data = [
+        {
+            "month": item["month"].strftime("%b %Y"),
+            "total": float(item["total"] or 0),
+        }
+        for item in qs if item["month"]
     ]
 
     return Response(data)
@@ -48,24 +163,21 @@ def rent_trend(request):
 
 @api_view(["GET"])
 def occupancy_stats(request):
-    """
-    Returns occupied vs vacant units.
-    Optional filter: property_number
-    """
-    property_number = request.GET.get("property_number")
-
-    units = Unit.objects.all()
-    if property_number:
-        units = units.filter(property__property_number=property_number)
+    units = _apply_unit_filters(Unit.objects.all(), request)
 
     total_units = units.count()
     occupied = units.filter(is_occupied=True).count()
     vacant = units.filter(is_occupied=False).count()
 
+    occupancy_rate = 0
+    if total_units > 0:
+        occupancy_rate = round((occupied / total_units) * 100, 1)
+
     data = {
         "total_units": total_units,
         "occupied": occupied,
-        "vacant": vacant
+        "vacant": vacant,
+        "occupancy_rate": occupancy_rate,
     }
     return Response(data)
 
@@ -73,21 +185,103 @@ def occupancy_stats(request):
 @api_view(["GET"])
 def revenue_summary(request):
     """
-    Returns total revenue collected.
-    Optional filters:
-        start_date, end_date, property_number
+    Actual collected revenue from receipts.
     """
-    start_date = request.GET.get("start_date")
-    end_date = request.GET.get("end_date")
+    receipts = _apply_receipt_filters(Receipt.objects.all(), request)
+    total = receipts.aggregate(total=Sum("amount_paid"))["total"] or 0
+
+    return Response({
+        "total_revenue": float(total)
+    })
+
+
+@api_view(["GET"])
+def dashboard_summary(request):
+    properties = _apply_property_filters(Property.objects.all(), request)
+    units = _apply_unit_filters(Unit.objects.all(), request)
+    tenants = _apply_tenant_filters(Tenant.objects.all(), request)
+    
+    leases = Lease.objects.all()
+    if request.user and request.user.is_authenticated:
+        leases = leases.filter(unit__property__owner=request.user)
+    else:
+        leases = leases.none()
+
     property_number = request.GET.get("property_number")
-
-    invoices = Invoice.objects.all()
     if property_number:
-        invoices = invoices.filter(lease__unit__property__property_number=property_number)
-    if start_date:
-        invoices = invoices.filter(created_at__date__gte=parse_date(start_date))
-    if end_date:
-        invoices = invoices.filter(created_at__date__lte=parse_date(end_date))
+        leases = leases.filter(unit__property__property_number=property_number)
+        
+    invoices = _apply_invoice_filters(Invoice.objects.all(), request)
+    receipts = _apply_receipt_filters(Receipt.objects.all(), request)
 
-    total = invoices.aggregate(total=Sum("amount"))["total"] or 0
-    return Response({"total_revenue": total})
+    total_properties = properties.count()
+    total_units = units.count()
+    occupied_units = units.filter(is_occupied=True).count()
+    vacant_units = units.filter(is_occupied=False).count()
+    active_tenants = tenants.filter(is_active=True).count()
+    active_leases = leases.filter(is_active=True).count()
+
+    total_billed = invoices.aggregate(total=Sum("amount"))["total"] or Decimal("0")
+    total_collected = receipts.aggregate(total=Sum("amount_paid"))["total"] or Decimal("0")
+
+    invoice_status_counts = invoices.aggregate(
+        paid=Count("id", filter=Q(status="paid")),
+        partial=Count("id", filter=Q(status="partial")),
+        unpaid=Count("id", filter=Q(status="unpaid")),
+        past_due=Count("id", filter=Q(status="past_due")),
+    )
+
+    arrears_total = Decimal("0")
+    arrears_invoices = invoices.filter(status__in=["unpaid", "partial", "past_due"]).select_related(
+        "lease", "lease__tenant", "lease__unit", "lease__unit__property"
+    )
+    for invoice in arrears_invoices:
+        balance = invoice.balance()
+        if balance and balance > 0:
+            arrears_total += Decimal(balance)
+
+    occupancy_rate = 0
+    if total_units > 0:
+        occupancy_rate = round((occupied_units / total_units) * 100, 1)
+
+    collection_rate = 0
+    if total_billed > 0:
+        collection_rate = round((float(total_collected) / float(total_billed)) * 100, 1)
+
+    data = {
+        "total_properties": total_properties,
+        "total_units": total_units,
+        "occupied_units": occupied_units,
+        "vacant_units": vacant_units,
+        "occupancy_rate": occupancy_rate,
+        "active_tenants": active_tenants,
+        "active_leases": active_leases,
+        "total_billed": float(total_billed),
+        "total_collected": float(total_collected),
+        "arrears_total": float(arrears_total),
+        "collection_rate": collection_rate,
+        "paid_invoices": invoice_status_counts["paid"] or 0,
+        "partial_invoices": invoice_status_counts["partial"] or 0,
+        "unpaid_invoices": invoice_status_counts["unpaid"] or 0,
+        "past_due_invoices": invoice_status_counts["past_due"] or 0,
+    }
+    return Response(data)
+
+
+@api_view(["GET"])
+def invoice_receipt_comparison(request):
+    invoices = _apply_invoice_filters(Invoice.objects.all(), request)
+    receipts = _apply_receipt_filters(Receipt.objects.all(), request)
+
+    total_invoiced = invoices.aggregate(total=Sum("amount"))["total"] or 0
+    total_received = receipts.aggregate(total=Sum("amount_paid"))["total"] or 0
+
+    outstanding = Decimal(str(total_invoiced)) - Decimal(str(total_received))
+    if outstanding < 0:
+        outstanding = Decimal("0")
+
+    return Response({
+        "total_invoiced": float(total_invoiced),
+        "total_received": float(total_received),
+        "outstanding": float(outstanding),
+    })
