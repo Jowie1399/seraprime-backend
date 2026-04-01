@@ -26,7 +26,7 @@ class TenantSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
     def get_total_arrears(self, obj):
-        return float(obj.total_arrears())
+        return 0 # float(obj.total_arrears())
 
 
 class LeaseSerializer(serializers.ModelSerializer):
