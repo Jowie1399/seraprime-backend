@@ -51,8 +51,12 @@ class Invoice(models.Model):
 
     # ---------- CORE CALCULATIONS ----------
 
+    
     def total_paid(self):
-        return sum(receipt.amount_paid for receipt in self.receipts.all())
+        return sum(
+            (receipt.amount_paid for receipt in self.receipts.all()),
+            Decimal("0.00")
+        )
 
     def balance(self):
         return self.amount - Decimal(self.total_paid())

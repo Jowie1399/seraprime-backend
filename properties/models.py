@@ -2,7 +2,7 @@ from django.db import models
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.utils import timezone
-
+from decimal import Decimal
 User = get_user_model()
 
 
@@ -44,8 +44,8 @@ class Tenant(models.Model):
             lease__tenant=self,
             status__in=["unpaid", "partial", "past_due"]
         )
-        return sum(inv.balance() for inv in invoices)
-
+        return sum((inv.balance() for inv in invoices), Decimal("0.00"))
+    
     def __str__(self):
         return self.full_name
 
