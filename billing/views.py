@@ -4,6 +4,11 @@ from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from django.http import JsonResponse
+from django.contrib.auth.decorators import login_required
+
 
 from .models import Invoice, Receipt
 from .serializers import InvoiceSerializer, ReceiptSerializer
@@ -135,17 +140,17 @@ class ReceiptViewSet(viewsets.ModelViewSet):
         return queryset
 
 
-from django.http import JsonResponse
-from django.contrib.auth.decorators import login_required
 
-
-@login_required
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def trigger_monthly_invoices(request):
     count = generate_monthly_invoices_for_owner(request.user.id)
-    return JsonResponse({"message": f"{count} invoices generated for this month."})
+    return Response({"message": f"{count} invoices generated."})
 
 
-@login_required
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def trigger_past_due_notifications(request):
     notify_past_due_invoices()
-    return JsonResponse({"message": "Past-due invoices updated and notifications sent."})
+    return Response({"message": "Past-due processed."})
+
