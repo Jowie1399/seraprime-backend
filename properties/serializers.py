@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import Property, Unit, Tenant, Lease
- from datetime import date
+from datetime import date
 from calendar import monthrange
 
 
