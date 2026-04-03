@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from decimal import Decimal
+
 User = get_user_model()
 
 
@@ -57,6 +58,7 @@ class Lease(models.Model):
     start_date = models.DateField()
     end_date = models.DateField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
+    due_day = models.IntegerField(default=5)
 
     class Meta:
         constraints = [
