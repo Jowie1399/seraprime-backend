@@ -4,6 +4,7 @@ from datetime import date
 from calendar import monthrange
 
 
+
 class PropertySerializer(serializers.ModelSerializer):
     class Meta:
         model = Property
@@ -49,8 +50,6 @@ class TenantSerializer(serializers.ModelSerializer):
         lease = obj.leases.filter(is_active=True).first()
         return str(lease.rent_amount) if lease else None
     
-        from datetime import date
-    from calendar import monthrange
 
     def get_next_due_date(self, obj):
         lease = obj.leases.filter(is_active=True).first()
