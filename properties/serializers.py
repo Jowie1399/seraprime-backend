@@ -50,6 +50,10 @@ class TenantSerializer(serializers.ModelSerializer):
         lease = obj.leases.filter(is_active=True).first()
         return str(lease.rent_amount) if lease else None
     
+    def get_start_date(self, obj):
+        lease = obj.leases.filter(is_active=True).first()
+        return lease.start_date if lease else None
+    
 
     def get_next_due_date(self, obj):
         lease = obj.leases.filter(is_active=True).first()
