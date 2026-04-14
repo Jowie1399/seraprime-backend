@@ -24,6 +24,8 @@ from .daraja import register_c2b_urls
 
 # ✅ REGISTER URL TRIGGER
 @api_view(["GET"])
+@authentication_classes([])        # 🔥 ADD THIS forpublic
+@permission_classes([AllowAny])    # 🔥 ADD THIS for public
 def trigger_register_urls(request):
     result = register_c2b_urls()
     return Response(result)
