@@ -1,4 +1,3 @@
-# mpesa/views.py
 from decimal import Decimal
 from datetime import datetime
 
@@ -19,32 +18,38 @@ from .models import MpesaTransaction
 from .services import process_transaction
 from .serializers import MpesaTransactionSerializer
 from billing.models import Invoice
+from properties.models import Property
+from .daraja import register_c2b_urls
+
+
+# ✅ REGISTER URL TRIGGER
+@api_view(["GET"])
+def trigger_register_urls(request):
+    result = register_c2b_urls()
+    return Response(result)
 
 
 def parse_mpesa_datetime(value):
-    """
-    Safaricom C2B TransTime often comes as YYYYMMDDHHMMSS
-    Example: 20260318153045
-    """
     if not value:
         return None
-
     try:
         return datetime.strptime(str(value), "%Y%m%d%H%M%S")
     except Exception:
         return None
 
 
+# ✅ M-PESA CONFIRMATION (PRODUCTION LOGIC)
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([AllowAny])
 def mpesa_confirmation(request):
     print("\n🔥 C2B CONFIRMATION RECEIVED 🔥")
+    print("DATA:", request.data)
 
     receipt = request.data.get("TransID")
     amount = request.data.get("TransAmount")
     phone = request.data.get("MSISDN")
-    account_ref = request.data.get("BillRefNumber")
+    account_ref = request.data.get("BillRefNumber")  # 👈 THIS IS KEY
     transaction_date = request.data.get("TransTime")
 
     if not receipt:
@@ -56,8 +61,23 @@ def mpesa_confirmation(request):
     try:
         amount_value = Decimal(str(amount)) if amount else Decimal("0")
 
+        # ✅ REAL LOGIC: Map payment → Property → Owner
+        property_obj = Property.objects.filter(
+            property_number=account_ref
+        ).first()
+
+        if not property_obj:
+            print("❌ Property not found for:", account_ref)
+            return Response(
+                {"ResultCode": 0, "ResultDesc": "Property not found"},
+                status=status.HTTP_200_OK,
+            )
+
+        owner = property_obj.owner
+
         with transaction.atomic():
             transaction_obj = MpesaTransaction.objects.create(
+                owner=owner,
                 receipt_number=str(receipt),
                 phone_number=str(phone or ""),
                 amount=amount_value,
@@ -79,6 +99,7 @@ def mpesa_confirmation(request):
             status=status.HTTP_200_OK,
         )
 
+    # ✅ Process payment (match to invoice)
     try:
         process_transaction(transaction_obj)
     except Exception as e:
@@ -90,31 +111,31 @@ def mpesa_confirmation(request):
     )
 
 
+# ✅ VALIDATION
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([AllowAny])
 def mpesa_validation(request):
     print("\n🟡 VALIDATION REQUEST RECEIVED")
+    print("DATA:", request.data)
+
     return Response(
         {"ResultCode": 0, "ResultDesc": "Accepted"},
         status=status.HTTP_200_OK,
     )
 
 
+# ✅ VIEWSET
 class MpesaTransactionViewSet(viewsets.ModelViewSet):
     serializer_class = MpesaTransactionSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         user = self.request.user
-        qs = (
+
+        return (
             MpesaTransaction.objects
-            .filter(
-                Q(property__owner=user) |
-                Q(invoice__lease__unit__property__owner=user) |
-                Q(unit__property__owner=user) |
-                Q(tenant__property__owner=user)
-            )
+            .filter(owner=user)
             .select_related(
                 "property",
                 "unit",
@@ -125,52 +146,17 @@ class MpesaTransactionViewSet(viewsets.ModelViewSet):
                 "invoice__lease__unit",
                 "invoice__lease__unit__property",
             )
-            .distinct()
             .order_by("-created_at")
         )
-
-        is_matched = self.request.query_params.get("is_matched")
-        if is_matched in ["true", "false"]:
-            qs = qs.filter(is_matched=(is_matched == "true"))
-
-        property_id = self.request.query_params.get("property")
-        if property_id:
-            qs = qs.filter(property_id=property_id)
-
-        unit_id = self.request.query_params.get("unit")
-        if unit_id:
-            qs = qs.filter(unit_id=unit_id)
-
-        tenant_id = self.request.query_params.get("tenant")
-        if tenant_id:
-            qs = qs.filter(tenant_id=tenant_id)
-
-        invoice_id = self.request.query_params.get("invoice")
-        if invoice_id:
-            qs = qs.filter(invoice_id=invoice_id)
-
-        search = self.request.query_params.get("search")
-        if search:
-            qs = qs.filter(
-                Q(receipt_number__icontains=search) |
-                Q(phone_number__icontains=search) |
-                Q(account_reference__icontains=search) |
-                Q(property__name__icontains=search) |
-                Q(property__property_number__icontains=search) |
-                Q(unit__name__icontains=search) |
-                Q(tenant__full_name__icontains=search) |
-                Q(invoice__invoice_number__icontains=search)
-            )
-
-        return qs
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context["request"] = self.request
         return context
 
+    # ✅ Manual create
     def perform_create(self, serializer):
-        transaction_obj = serializer.save()
+        transaction_obj = serializer.save(owner=self.request.user)
 
         try:
             process_transaction(transaction_obj)
@@ -186,87 +172,56 @@ class MpesaTransactionViewSet(viewsets.ModelViewSet):
             except Exception as e:
                 print("❌ Re-processing error:", str(e))
 
+    # ✅ Manual allocation
     @action(detail=True, methods=["post"])
     def manually_allocate(self, request, pk=None):
         with transaction.atomic():
-            transaction_obj = (
-                self.get_queryset()
-                .select_for_update()
-                .select_related(
-                    "property",
-                    "unit",
-                    "tenant",
-                    "invoice",
-                )
-                .get(pk=pk)
-            )
+            transaction_obj = self.get_queryset().select_for_update().get(pk=pk)
 
             if transaction_obj.is_matched:
                 return Response(
-                    {"error": "Transaction already matched."},
-                    status=status.HTTP_400_BAD_REQUEST,
+                    {"error": "Already matched"},
+                    status=status.HTTP_400_BAD_REQUEST
                 )
 
             invoice_id = request.data.get("invoice_id")
+
             if not invoice_id:
                 return Response(
-                    {"error": "invoice_id is required."},
-                    status=status.HTTP_400_BAD_REQUEST,
+                    {"error": "invoice_id required"},
+                    status=status.HTTP_400_BAD_REQUEST
                 )
 
             try:
-                invoice = (
-                    Invoice.objects
-                    .select_for_update()
-                    .select_related("lease__tenant", "lease__unit__property")
-                    .get(
-                        id=invoice_id,
-                        lease__unit__property__owner=request.user,
-                    )
+                invoice = Invoice.objects.get(
+                    id=invoice_id,
+                    lease__unit__property__owner=request.user
                 )
             except Invoice.DoesNotExist:
                 return Response(
-                    {"error": "Invalid invoice."},
-                    status=status.HTTP_400_BAD_REQUEST,
+                    {"error": "Invalid invoice"},
+                    status=status.HTTP_400_BAD_REQUEST
                 )
 
             if invoice.status == "paid":
                 return Response(
-                    {"error": "This invoice is already fully paid."},
-                    status=status.HTTP_400_BAD_REQUEST,
+                    {"error": "Invoice already paid"},
+                    status=status.HTTP_400_BAD_REQUEST
                 )
+
+            invoice.apply_payment(transaction_obj.amount)
 
             transaction_obj.invoice = invoice
             transaction_obj.tenant = invoice.lease.tenant
             transaction_obj.unit = invoice.lease.unit
             transaction_obj.property = invoice.lease.unit.property
-
-            transaction_obj.full_clean(exclude=["raw_payload"])
-
-            invoice.apply_payment(transaction_obj.amount)
-
             transaction_obj.is_matched = True
             transaction_obj.is_processed = True
-            transaction_obj.save(
-                update_fields=[
-                    "invoice",
-                    "tenant",
-                    "unit",
-                    "property",
-                    "is_matched",
-                    "is_processed",
-                ]
-            )
+            transaction_obj.save()
 
-        return Response(
-            {
-                "message": "Payment allocated successfully",
-                "transaction_id": transaction_obj.id,
-                "invoice_id": invoice.id,
-                "invoice_number": invoice.invoice_number,
-            },
-            status=status.HTTP_200_OK,
-        )
+        return Response({
+            "message": "Payment allocated successfully"
+        })
 
     @action(detail=False, methods=["get"])
     def unmatched(self, request):

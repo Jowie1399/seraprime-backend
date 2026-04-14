@@ -12,7 +12,7 @@ else:
 
 
 OAUTH_URL = f"{BASE_URL}/oauth/v1/generate?grant_type=client_credentials"
-C2B_REGISTER_URL = f"{BASE_URL}/mpesa/c2b/v1/registerurl"
+C2B_REGISTER_URL = f"{BASE_URL}/mpesa/c2b/v2/registerurl"
 
 
 # Simple in-memory token cache
