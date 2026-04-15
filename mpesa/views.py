@@ -48,28 +48,29 @@ def mpesa_confirmation(request):
     print("\n🔥 C2B CONFIRMATION RECEIVED 🔥")
     print("DATA:", request.data)
 
-    receipt = request.data.get("TransID")
-    amount = request.data.get("TransAmount")
-    phone = request.data.get("MSISDN")
-    account_ref = request.data.get("BillRefNumber")  # 👈 THIS IS KEY
-    transaction_date = request.data.get("TransTime")
-
-    if not receipt:
-        return Response(
-            {"ResultCode": 1, "ResultDesc": "Invalid receipt"},
-            status=status.HTTP_200_OK,
-        )
-
     try:
+        receipt = request.data.get("TransID")
+        amount = request.data.get("TransAmount")
+        phone = request.data.get("MSISDN")
+        account_ref = request.data.get("BillRefNumber")
+        transaction_date = request.data.get("TransTime")
+
+        # ✅ Safaricom test ping (NO transaction data)
+        if not receipt:
+            print("⚠️ Safaricom test ping received")
+            return Response(
+                {"ResultCode": 0, "ResultDesc": "Accepted"},
+                status=status.HTTP_200_OK,
+            )
+
         amount_value = Decimal(str(amount)) if amount else Decimal("0")
 
-        # ✅ REAL LOGIC: Map payment → Property → Owner
         property_obj = Property.objects.filter(
             property_number=account_ref
         ).first()
 
         if not property_obj:
-            print("❌ Property not found for:", account_ref)
+            print("❌ Property not found:", account_ref)
             return Response(
                 {"ResultCode": 0, "ResultDesc": "Property not found"},
                 status=status.HTTP_200_OK,
@@ -88,29 +89,22 @@ def mpesa_confirmation(request):
                 raw_payload=request.data,
             )
 
-    except IntegrityError:
+        try:
+            process_transaction(transaction_obj)
+        except Exception as e:
+            print("❌ PROCESSING ERROR:", str(e))
+
         return Response(
-            {"ResultCode": 0, "ResultDesc": "Duplicate ignored"},
+            {"ResultCode": 0, "ResultDesc": "Confirmation received"},
             status=status.HTTP_200_OK,
         )
 
     except Exception as e:
-        print("❌ DB ERROR:", str(e))
+        print("❌ HARD CRASH:", str(e))
         return Response(
             {"ResultCode": 0, "ResultDesc": "Accepted"},
             status=status.HTTP_200_OK,
         )
-
-    # ✅ Process payment (match to invoice)
-    try:
-        process_transaction(transaction_obj)
-    except Exception as e:
-        print("❌ PROCESSING ERROR:", str(e))
-
-    return Response(
-        {"ResultCode": 0, "ResultDesc": "Confirmation received"},
-        status=status.HTTP_200_OK,
-    )
 
 
 # ✅ VALIDATION
