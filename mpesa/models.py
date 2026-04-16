@@ -4,13 +4,7 @@ from billing.models import Invoice
 from django.conf import settings
 
 class MpesaTransaction(models.Model):
-    owner = models.ForeignKey(   # ✅ ADD THIS FIELD HERE
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="mpesa_transactions",
-        null=True,      # ✅ ADD
-        blank=True 
-    )
+    owner = models.ForeignKey(    settings.AUTH_USER_MODEL, on_delete=models.CASCADE,  related_name="mpesa_transactions",null=True,  blank=True )
     receipt_number = models.CharField(
         max_length=50,
         unique=True,
