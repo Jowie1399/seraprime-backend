@@ -48,8 +48,8 @@ def get_access_token():
 def register_c2b_urls():
     """
     Register confirmation and validation URLs with Daraja.
-    Run once when setting up sandbox or production.
     """
+
     access_token = get_access_token()
 
     headers = {
@@ -64,8 +64,17 @@ def register_c2b_urls():
         "ValidationURL": settings.MPESA_VALIDATION_URL
     }
 
-    response = requests.post(C2B_REGISTER_URL, json=payload, headers=headers)
-    print(response.text)
-    return response.json()
+    response = requests.post(
+        C2B_REGISTER_URL,
+        json=payload,
+        headers=headers
+    )
 
-    
+    # 🔥 ADD DEBUG (IMPORTANT)
+    print("🔥 MPESA REGISTER STATUS:", response.status_code)
+    print("🔥 MPESA REGISTER RESPONSE:", response.text)
+
+    try:
+        return response.json()
+    except Exception:
+        return {"error": response.text}

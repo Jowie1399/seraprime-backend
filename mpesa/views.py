@@ -1,5 +1,6 @@
 from decimal import Decimal
 from datetime import datetime
+import json
 
 from django.db import transaction
 from django.db.models import Q
@@ -52,57 +53,62 @@ def parse_mpesa_datetime(value):
 @authentication_classes([])
 @permission_classes([AllowAny])
 def mpesa_confirmation(request):
-    print("\n🔥 C2B CONFIRMATION RECEIVED 🔥")
-    print("FULL DATA:", request.data)
+
+    print("\n🔥🔥🔥 C2B CONFIRMATION HIT 🔥🔥🔥")
+
+    # SAFE PARSING
+    try:
+        data = request.data
+    except Exception:
+        data = json.loads(request.body.decode("utf-8"))
+
+    print("🔥 HEADERS:", request.headers)
+    print("🔥 RAW BODY:", request.body)
+    print("🔥 PARSED DATA:", data)
 
     try:
-        receipt = request.data.get("TransID")
-        amount = request.data.get("TransAmount")
-        phone = request.data.get("MSISDN")
-        account_ref = request.data.get("BillRefNumber")
-        transaction_date = request.data.get("TransTime")
+        receipt = data.get("TransID")
+        amount = data.get("TransAmount")
+        phone = data.get("MSISDN")
+        account_ref = data.get("BillRefNumber")
+        transaction_date = data.get("TransTime")
 
         # =========================
         # SAFARICOM TEST PING
         # =========================
         if not receipt:
             print("⚠️ Safaricom test ping received")
-            return Response({"ResultCode": 0, "ResultDesc": "Accepted"})
+
+            # ✅ FIXED RESPONSE (STRICT DARAJA FORMAT)
+            return Response({
+                "ResultCode": "0",
+                "ResultDesc": "Accepted"
+            })
+
 
         # =========================
         # NORMALIZE INPUT
         # =========================
         account_ref = str(account_ref or "").strip()
-        account_ref = account_ref.replace("-", " ")  # unify separators
+        account_ref = account_ref.replace("-", " ")
 
         print("RAW BILL REF:", account_ref)
 
         property_number = None
         unit_part = None
 
-        # =========================
-        # PARSE LOGIC
-        # =========================
-
         parts = account_ref.split()
 
         if len(parts) == 1:
-            # CASE 1: ONLY PROPERTY OR COMBINED STRING
             raw = parts[0]
-
-            # try direct match first
             property_number = raw
 
-            # =========================
-            # NO SEPARATOR SMART SPLIT
-            # =========================
             possible_property = Property.objects.filter(
                 property_number=property_number
             ).first()
 
             if not possible_property and len(raw) > 1:
 
-                # try last 1 char unit
                 prop_try = raw[:-1]
                 unit_try = raw[-1]
 
@@ -111,7 +117,6 @@ def mpesa_confirmation(request):
                     property_number = prop_try
                     unit_part = unit_try
                 else:
-                    # try last 2 chars unit (A1, B2, 10, etc)
                     prop_try = raw[:-2]
                     unit_try = raw[-2:]
 
@@ -121,23 +126,24 @@ def mpesa_confirmation(request):
                         unit_part = unit_try
 
         else:
-            # CASE 2: NORMAL FORMAT "100504 4"
             property_number = parts[0]
             unit_part = parts[1] if len(parts) > 1 else None
 
         print("FINAL PROPERTY:", property_number)
         print("FINAL UNIT:", unit_part)
 
-        # =========================
-        # FIND PROPERTY
-        # =========================
         property_obj = Property.objects.filter(
             property_number=property_number
         ).first()
 
         if not property_obj:
             print("❌ Property NOT FOUND:", property_number)
-            return Response({"ResultCode": 0, "ResultDesc": "Property not found"})
+
+            # ⚠️ STILL MUST RETURN ACCEPTED TO AVOID RETRIES
+            return Response({
+                "ResultCode": "0",
+                "ResultDesc": "Accepted"
+            })
 
         owner = property_obj.owner
 
@@ -159,9 +165,6 @@ def mpesa_confirmation(request):
             else:
                 print("⚠️ Unit NOT found:", unit_part)
 
-        # =========================
-        # AMOUNT
-        # =========================
         amount_value = Decimal(str(amount)) if amount else Decimal("0")
 
         # =========================
@@ -177,24 +180,32 @@ def mpesa_confirmation(request):
                 transaction_date=parse_mpesa_datetime(transaction_date),
                 property=property_obj,
                 unit=unit_obj,
-                raw_payload=request.data,
+                raw_payload=data,
             )
 
         print("✅ TRANSACTION SAVED:", transaction_obj.id)
 
-        # =========================
-        # PROCESS
-        # =========================
         try:
             process_transaction(transaction_obj)
         except Exception as e:
             print("❌ PROCESSING ERROR:", str(e))
 
-        return Response({"ResultCode": 0, "ResultDesc": "Confirmation received"})
+        # =========================
+        # 🔥 FIXED SAFARICOM RESPONSE (CRITICAL)
+        # =========================
+        return Response({
+            "ResultCode": "0",
+            "ResultDesc": "Accepted"
+        })
 
     except Exception as e:
         print("❌ HARD CRASH:", str(e))
-        return Response({"ResultCode": 0, "ResultDesc": "Accepted"})
+
+        # MUST STILL RETURN ACCEPTED TO PREVENT RETRIES
+        return Response({
+            "ResultCode": "0",
+            "ResultDesc": "Accepted"
+        })
 
 
 # =========================
@@ -204,17 +215,18 @@ def mpesa_confirmation(request):
 @authentication_classes([])
 @permission_classes([AllowAny])
 def mpesa_validation(request):
-    print("\n🟡 VALIDATION REQUEST RECEIVED")
+
+    print("\n🟡 VALIDATION HIT")
     print("DATA:", request.data)
 
-    return Response(
-        {"ResultCode": 0, "ResultDesc": "Accepted"},
-        status=status.HTTP_200_OK,
-    )
+    return Response({
+        "ResultCode": "0",
+        "ResultDesc": "Accepted"
+    })
 
 
 # =========================
-# VIEWSET
+# VIEWSET (UNCHANGED LOGIC)
 # =========================
 class MpesaTransactionViewSet(viewsets.ModelViewSet):
     serializer_class = MpesaTransactionSerializer
@@ -256,9 +268,6 @@ class MpesaTransactionViewSet(viewsets.ModelViewSet):
             except Exception as e:
                 print("❌ Re-processing error:", str(e))
 
-    # =========================
-    # MANUAL ALLOCATION
-    # =========================
     @action(detail=True, methods=["post"])
     def manually_allocate(self, request, pk=None):
         with transaction.atomic():
