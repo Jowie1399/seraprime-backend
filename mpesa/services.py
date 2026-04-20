@@ -1,103 +1,117 @@
-import re
 from django.db import transaction
-from properties.models import Property, Unit
+from django.db.models import Q
+
+from properties.models import Property, Unit, Tenant
 from billing.models import Invoice
-from .models import MpesaTransaction
 
 
-def normalize_reference(reference: str):
-    if not reference:
-        return ""
-    return re.sub(r"\s+", "", str(reference).upper())
+def process_transaction(transaction_obj):
+    """
+    SINGLE SOURCE OF TRUTH for ALL M-Pesa processing.
+    """
 
+    if transaction_obj.is_processed:
+        return transaction_obj
 
-def normalize_unit(unit: str):
-    if not unit:
-        return ""
-    return re.sub(r"[^A-Z0-9]", "", str(unit).upper())
+    account_ref = (transaction_obj.account_reference or "").strip()
+    account_ref = account_ref.replace("-", " ")
 
+    property_obj = None
+    unit_obj = None
+    tenant_obj = None
+    invoice_obj = None
 
-def process_transaction(transaction_obj: MpesaTransaction, notify_landlady=True):
-    with transaction.atomic():
-        transaction_locked = (
-            MpesaTransaction.objects
-            .select_for_update()
-            .select_related("property", "unit", "tenant", "invoice")
-            .get(id=transaction_obj.id)
-        )
+    # =========================
+    # PARSE ACCOUNT REFERENCE
+    # =========================
+    parts = account_ref.split()
 
-        if transaction_locked.is_processed:
-            return transaction_locked
+    property_number = None
+    unit_part = None
 
-        ref = normalize_reference(transaction_locked.account_reference)
-        match = re.match(r"(\d+)(.*)", ref)
+    if len(parts) == 1:
+        raw = parts[0]
+        property_number = raw
 
-        if not match:
-            transaction_locked.is_processed = True
-            transaction_locked.save(update_fields=["is_processed"])
-            return transaction_locked
+        prop = Property.objects.filter(property_number=raw).first()
 
-        property_number = match.group(1)
-        unit_part = normalize_unit(match.group(2))
+        if not prop and len(raw) > 1:
+            prop_try = raw[:-1]
+            unit_try = raw[-1]
 
+            prop = Property.objects.filter(property_number=prop_try).first()
+            if prop:
+                property_number = prop_try
+                unit_part = unit_try
+            else:
+                prop_try = raw[:-2]
+                unit_try = raw[-2:]
+
+                prop = Property.objects.filter(property_number=prop_try).first()
+                if prop:
+                    property_number = prop_try
+                    unit_part = unit_try
+    else:
+        property_number = parts[0]
+        unit_part = parts[1] if len(parts) > 1 else None
+
+    # =========================
+    # PROPERTY
+    # =========================
+    if property_number:
         property_obj = Property.objects.filter(
             property_number=property_number
         ).first()
 
-        if not property_obj:
-            transaction_locked.is_processed = True
-            transaction_locked.save(update_fields=["is_processed"])
-            return transaction_locked
+    # =========================
+    # UNIT
+    # =========================
+    if property_obj and unit_part:
+        unit_obj = Unit.objects.filter(
+            Q(name__iexact=unit_part) |
+            Q(name__iexact=unit_part.replace(" ", "")),
+            property=property_obj
+        ).first()
 
-        transaction_locked.property = property_obj
+    # =========================
+    # TENANT (from unit)
+    # =========================
+    if unit_obj:
+        tenant_obj = Tenant.objects.filter(
+            unit=unit_obj,
+            is_active=True
+        ).first()
 
-        if unit_part:
-            unit_obj = Unit.objects.filter(
-                property=property_obj,
-                name__iexact=unit_part
-            ).first()
+    # =========================
+    # INVOICE MATCHING
+    # =========================
+    if tenant_obj:
+        invoice_obj = Invoice.objects.filter(
+            lease__tenant=tenant_obj,
+            status__in=["pending", "partial"]
+        ).order_by("created_at").first()
 
-            if not unit_obj:
-                normalized_units = Unit.objects.filter(property=property_obj)
-                for u in normalized_units:
-                    if normalize_unit(u.name) == unit_part:
-                        unit_obj = u
-                        break
+    # =========================
+    # APPLY PAYMENT
+    # =========================
+    with transaction.atomic():
 
-            if unit_obj:
-                transaction_locked.unit = unit_obj
+        if property_obj:
+            transaction_obj.property = property_obj
 
-                lease = unit_obj.leases.filter(is_active=True).select_related("tenant").first()
+        if unit_obj:
+            transaction_obj.unit = unit_obj
 
-                if lease:
-                    transaction_locked.tenant = lease.tenant
+        if tenant_obj:
+            transaction_obj.tenant = tenant_obj
 
-                    invoice = (
-                        Invoice.objects
-                        .select_for_update()
-                        .filter(
-                            lease=lease,
-                            status__in=["unpaid", "partial", "past_due"]
-                        )
-                        .order_by("due_date", "created_at")
-                        .first()
-                    )
+        if invoice_obj:
+            invoice_obj.apply_payment(transaction_obj.amount)
 
-                    if invoice and not transaction_locked.is_matched:
-                        invoice.apply_payment(transaction_locked.amount)
-                        transaction_locked.invoice = invoice
-                        transaction_locked.is_matched = True
+            transaction_obj.invoice = invoice_obj
+            transaction_obj.is_matched = True
 
-        transaction_locked.is_processed = True
-        transaction_locked.save(
-            update_fields=[
-                "property",
-                "unit",
-                "tenant",
-                "invoice",
-                "is_matched",
-                "is_processed",
-            ]
-        )
+        transaction_obj.is_processed = True
+        transaction_obj.save()
 
-        return transaction_locked
+    return transaction_obj

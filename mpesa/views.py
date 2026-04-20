@@ -1,7 +1,8 @@
 from decimal import Decimal
 from datetime import datetime
 import json
-
+from django.db import IntegrityError
+from rest_framework import serializers
 from django.db import transaction
 from django.db.models import Q
 
@@ -37,13 +38,21 @@ def trigger_register_urls(request):
 # =========================
 # DATE PARSER
 # =========================
+
+
 def parse_mpesa_datetime(value):
     if not value:
         return None
+
     try:
+        # Try M-Pesa format first
         return datetime.strptime(str(value), "%Y%m%d%H%M%S")
     except Exception:
-        return None
+        try:
+            # Try ISO format (frontend)
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except Exception:
+            return None
 
 
 # =========================
@@ -79,12 +88,10 @@ def mpesa_confirmation(request):
         if not receipt:
             print("⚠️ Safaricom test ping received")
 
-            # ✅ FIXED RESPONSE (STRICT DARAJA FORMAT)
             return Response({
                 "ResultCode": "0",
                 "ResultDesc": "Accepted"
             })
-
 
         # =========================
         # NORMALIZE INPUT
@@ -139,7 +146,6 @@ def mpesa_confirmation(request):
         if not property_obj:
             print("❌ Property NOT FOUND:", property_number)
 
-            # ⚠️ STILL MUST RETURN ACCEPTED TO AVOID RETRIES
             return Response({
                 "ResultCode": "0",
                 "ResultDesc": "Accepted"
@@ -170,18 +176,25 @@ def mpesa_confirmation(request):
         # =========================
         # SAVE TRANSACTION
         # =========================
-        with transaction.atomic():
-            transaction_obj = MpesaTransaction.objects.create(
-                owner=owner,
-                receipt_number=str(receipt),
-                phone_number=str(phone or ""),
-                amount=amount_value,
-                account_reference=account_ref,
-                transaction_date=parse_mpesa_datetime(transaction_date),
-                property=property_obj,
-                unit=unit_obj,
-                raw_payload=data,
-            )
+        try:
+            with transaction.atomic():
+                transaction_obj = MpesaTransaction.objects.create(
+                    owner=owner,
+                    receipt_number=str(receipt),
+                    phone_number=str(phone or ""),
+                    amount=amount_value,
+                    account_reference=account_ref,
+                    transaction_date=parse_mpesa_datetime(transaction_date),
+                    raw_payload=data,
+                )
+
+        except IntegrityError:
+            print("⚠️ Duplicate receipt:", receipt)
+
+            return Response({
+                "ResultCode": "0",
+                "ResultDesc": "Accepted"
+            })
 
         print("✅ TRANSACTION SAVED:", transaction_obj.id)
 
@@ -190,9 +203,6 @@ def mpesa_confirmation(request):
         except Exception as e:
             print("❌ PROCESSING ERROR:", str(e))
 
-        # =========================
-        # 🔥 FIXED SAFARICOM RESPONSE (CRITICAL)
-        # =========================
         return Response({
             "ResultCode": "0",
             "ResultDesc": "Accepted"
@@ -201,7 +211,6 @@ def mpesa_confirmation(request):
     except Exception as e:
         print("❌ HARD CRASH:", str(e))
 
-        # MUST STILL RETURN ACCEPTED TO PREVENT RETRIES
         return Response({
             "ResultCode": "0",
             "ResultDesc": "Accepted"
@@ -226,7 +235,7 @@ def mpesa_validation(request):
 
 
 # =========================
-# VIEWSET (UNCHANGED LOGIC)
+# VIEWSET
 # =========================
 class MpesaTransactionViewSet(viewsets.ModelViewSet):
     serializer_class = MpesaTransactionSerializer
@@ -254,7 +263,13 @@ class MpesaTransactionViewSet(viewsets.ModelViewSet):
         return context
 
     def perform_create(self, serializer):
-        transaction_obj = serializer.save(owner=self.request.user)
+        try:
+            transaction_obj = serializer.save(owner=self.request.user)
+        except IntegrityError:
+            raise serializers.ValidationError({
+                "receipt_number": "Transaction with this receipt already exists"
+            })
+
         try:
             process_transaction(transaction_obj)
         except Exception as e:
@@ -270,37 +285,30 @@ class MpesaTransactionViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def manually_allocate(self, request, pk=None):
-        with transaction.atomic():
-            transaction_obj = self.get_queryset().select_for_update().get(pk=pk)
+        transaction_obj = self.get_queryset().get(pk=pk)
 
-            if transaction_obj.is_matched:
-                return Response({"error": "Already matched"}, status=400)
+        if transaction_obj.is_matched:
+            return Response({"error": "Already matched"}, status=400)
 
-            invoice_id = request.data.get("invoice_id")
+        invoice_id = request.data.get("invoice_id")
 
-            if not invoice_id:
-                return Response({"error": "invoice_id required"}, status=400)
+        if not invoice_id:
+            return Response({"error": "invoice_id required"}, status=400)
 
-            try:
-                invoice = Invoice.objects.get(
-                    id=invoice_id,
-                    lease__unit__property__owner=request.user
-                )
-            except Invoice.DoesNotExist:
-                return Response({"error": "Invalid invoice"}, status=400)
+        try:
+            invoice = Invoice.objects.get(
+                id=invoice_id,
+                lease__unit__property__owner=request.user
+            )
+        except Invoice.DoesNotExist:
+            return Response({"error": "Invalid invoice"}, status=400)
 
-            if invoice.status == "paid":
-                return Response({"error": "Invoice already paid"}, status=400)
+        # attach invoice ONLY
+        transaction_obj.invoice = invoice
+        transaction_obj.save()
 
-            invoice.apply_payment(transaction_obj.amount)
-
-            transaction_obj.invoice = invoice
-            transaction_obj.tenant = invoice.lease.tenant
-            transaction_obj.unit = invoice.lease.unit
-            transaction_obj.property = invoice.lease.unit.property
-            transaction_obj.is_matched = True
-            transaction_obj.is_processed = True
-            transaction_obj.save()
+        # 🔥 REUSE SAME ENGINE
+        process_transaction(transaction_obj)
 
         return Response({"message": "Payment allocated successfully"})
 
