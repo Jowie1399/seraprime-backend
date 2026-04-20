@@ -82,15 +82,27 @@ def process_transaction(transaction_obj):
             is_active=True
         ).first()
 
-    # =========================
-    # INVOICE MATCHING
-    # =========================
-    if tenant_obj:
-        invoice_obj = Invoice.objects.filter(
-            lease__tenant=tenant_obj,
-            status__in=["pending", "partial"]
-        ).order_by("created_at").first()
+    
+        # =========================
+        # INVOICE PRIORITY (MANUAL FIRST)
+        # =========================
+    if transaction_obj.invoice:
+        invoice_obj = transaction_obj.invoice
 
+        # derive tenant/property/unit from invoice
+        tenant_obj = invoice_obj.lease.tenant
+        unit_obj = invoice_obj.lease.unit
+        property_obj = unit_obj.property
+
+    else:
+        # fallback to auto matching
+        if tenant_obj:
+            invoice_obj = Invoice.objects.filter(
+                lease__tenant=tenant_obj,
+                status__in=["pending", "partial"]
+            ).order_by("created_at").first()
+            
+            
     # =========================
     # APPLY PAYMENT
     # =========================
@@ -106,9 +118,14 @@ def process_transaction(transaction_obj):
             transaction_obj.tenant = tenant_obj
 
         if invoice_obj:
-            invoice_obj.apply_payment(transaction_obj.amount)
+    # only apply if not already matched
+            if not transaction_obj.is_matched:
+                invoice_obj.apply_payment(transaction_obj.amount)
 
             transaction_obj.invoice = invoice_obj
+            transaction_obj.tenant = tenant_obj
+            transaction_obj.unit = unit_obj
+            transaction_obj.property = property_obj
             transaction_obj.is_matched = True
 
         transaction_obj.is_processed = True
