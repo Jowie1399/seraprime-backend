@@ -22,6 +22,7 @@ from .serializers import MpesaTransactionSerializer
 from billing.models import Invoice
 from properties.models import Property
 from .daraja import register_c2b_urls
+from .services import process_transaction
 
 
 # =========================
@@ -283,32 +284,30 @@ class MpesaTransactionViewSet(viewsets.ModelViewSet):
             except Exception as e:
                 print("❌ Re-processing error:", str(e))
 
+    
+
     @action(detail=True, methods=["post"])
     def manually_allocate(self, request, pk=None):
-        transaction_obj = self.get_queryset().get(pk=pk)
-
-        if transaction_obj.is_matched:
-            return Response({"error": "Already matched"}, status=400)
+        transaction = self.get_object()
 
         invoice_id = request.data.get("invoice_id")
 
         if not invoice_id:
-            return Response({"error": "invoice_id required"}, status=400)
+            return Response({"error": "invoice_id is required"}, status=400)
 
         try:
-            invoice = Invoice.objects.get(
-                id=invoice_id,
-                lease__unit__property__owner=request.user
-            )
+            invoice = Invoice.objects.get(id=invoice_id)
         except Invoice.DoesNotExist:
-            return Response({"error": "Invalid invoice"}, status=400)
+            return Response({"error": "Invalid invoice"}, status=404)
 
-        # attach invoice ONLY
-        transaction_obj.invoice = invoice
-        transaction_obj.save()
+        # 🔥 attach invoice FIRST
+        transaction.invoice = invoice
+        transaction.is_processed = False
+        transaction.is_matched = False  # allow processing
+        transaction.save()
 
-        # 🔥 REUSE SAME ENGINE
-        process_transaction(transaction_obj)
+        # 🔥 THIS IS THE MISSING PIECE
+        process_transaction(transaction)
 
         return Response({"message": "Payment allocated successfully"})
 
