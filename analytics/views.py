@@ -114,7 +114,7 @@ def rent_trend(request):
     """
     Billed rent trend grouped by invoice created month.
     """
-    invoices = _apply_invoice_filters(Invoice.objects.all(), request)
+    invoices = _apply_invoice_filters(Invoice.objects.filters(lease__is_active=True,lease__tenant__is_active=True), request)
 
     qs = (
         invoices
@@ -232,7 +232,7 @@ def dashboard_summary(request):
     )
 
     arrears_total = Decimal("0")
-    arrears_invoices = invoices.filter(status__in=["unpaid", "partial", "past_due"]).select_related(
+    arrears_invoices = invoices.filter(lease__is_active=True,lease__tenant__is_active=True,status__in=["unpaid", "partial", "past_due"]).select_related(
         "lease", "lease__tenant", "lease__unit", "lease__unit__property"
     )
     for invoice in arrears_invoices:
@@ -270,7 +270,7 @@ def dashboard_summary(request):
 
 @api_view(["GET"])
 def invoice_receipt_comparison(request):
-    invoices = _apply_invoice_filters(Invoice.objects.all(), request)
+    invoices = _apply_invoice_filters(Invoice.objects.filter(lease__is_active=True,lease__tenant__is_active=True), request)
     receipts = _apply_receipt_filters(Receipt.objects.all(), request)
 
     total_invoiced = invoices.aggregate(total=Sum("amount"))["total"] or 0

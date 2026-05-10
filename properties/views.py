@@ -161,7 +161,10 @@ class DashboardView(APIView):
 
         unpaid_invoices = Invoice.objects.filter(
             lease__unit__in=units,
+            lease__is_active=True,
+            lease__tenant__is_active=True,
             status__in=["unpaid", "partial", "past_due"]
+            
         )
         arrears = sum(inv.balance() for inv in unpaid_invoices)
         occupancy_rate = round((occupied_units / total_units) * 100, 2) if total_units > 0 else 0

@@ -10,7 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY
 # ===============================
 SECRET_KEY = config("DJANGO_SECRET_KEY")
-DEBUG =True
+DEBUG =False
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="localhost,127.0.0.1").split(",")
 
 # ===============================
