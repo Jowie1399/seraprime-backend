@@ -142,32 +142,56 @@ class DashboardView(APIView):
 
     def get(self, request):
         user = request.user
+
         properties = Property.objects.filter(owner=user)
-        property_count = properties.count()
+
         units = Unit.objects.filter(property__in=properties)
-        total_units = units.count()
-        occupied_units = units.filter(is_occupied=True).count()
-        tenants = Tenant.objects.filter(property__in=properties, is_active=True)
-        tenant_count = tenants.count()
-        leases = Lease.objects.filter(unit__in=units, is_active=True)
 
-        expected_rent = leases.aggregate(total=Sum("rent_amount"))["total"] or 0
-        now = timezone.now()
-        collected = Receipt.objects.filter(
-            invoice__lease__unit__in=units,
-            payment_date__year=now.year,
-            payment_date__month=now.month
-        ).aggregate(total=Sum("amount_paid"))["total"] or 0
-
-        unpaid_invoices = Invoice.objects.filter(
-            lease__unit__in=units,
-            lease__is_active=True,
-            lease__tenant__is_active=True,
-            status__in=["unpaid", "partial", "past_due"]
-            
+        active_leases = Lease.objects.filter(
+            unit__in=units,
+            is_active=True,
+            tenant__is_active=True,
         )
+
+        active_tenants = Tenant.objects.filter(
+            property__in=properties,
+            is_active=True
+        )
+
+        invoices = Invoice.objects.filter(
+            lease__in=active_leases
+        )
+
+        receipts = Receipt.objects.filter(
+            invoice__lease__in=active_leases
+        )
+
+        property_count = properties.count()
+
+        total_units = units.count()
+
+        occupied_units = units.filter(is_occupied=True).count()
+
+        tenant_count = active_tenants.count()
+
+        expected_rent = invoices.aggregate(
+            total=Sum("amount")
+        )["total"] or 0
+
+        collected = receipts.aggregate(
+            total=Sum("amount_paid")
+        )["total"] or 0
+
+        unpaid_invoices = invoices.filter(
+            status__in=["unpaid", "partial", "past_due"]
+        )
+
         arrears = sum(inv.balance() for inv in unpaid_invoices)
-        occupancy_rate = round((occupied_units / total_units) * 100, 2) if total_units > 0 else 0
+
+        occupancy_rate = (
+            round((occupied_units / total_units) * 100, 2)
+            if total_units > 0 else 0
+        )
 
         data = {
             "properties": property_count,
@@ -177,4 +201,5 @@ class DashboardView(APIView):
             "total_arrears": arrears,
             "occupancy_rate_percent": occupancy_rate,
         }
+
         return Response(data)

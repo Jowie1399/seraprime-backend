@@ -8,7 +8,25 @@ from rest_framework.response import Response
 
 from billing.models import Invoice, Receipt
 from properties.models import Unit, Property, Tenant, Lease
+from django.utils import timezone
 
+
+def _active_invoice_queryset(request):
+    invoices = Invoice.objects.filter(
+        lease__is_active=True,
+        lease__tenant__is_active=True,
+    )
+
+    return _apply_invoice_filters(invoices, request)
+
+
+def _active_receipt_queryset(request):
+    receipts = Receipt.objects.filter(
+        invoice__lease__is_active=True,
+        invoice__lease__tenant__is_active=True,
+    )
+
+    return _apply_receipt_filters(receipts, request)
 
 def _filter_by_owner(queryset, request, property_lookup="property__owner"):
     user = request.user
@@ -114,8 +132,7 @@ def rent_trend(request):
     """
     Billed rent trend grouped by invoice created month.
     """
-    invoices = _apply_invoice_filters(Invoice.objects.filters(lease__is_active=True,lease__tenant__is_active=True), request)
-
+    invoices = _active_invoice_queryset(request)
     qs = (
         invoices
         .annotate(month=TruncMonth("created_at"))
@@ -140,8 +157,8 @@ def receipts_trend(request):
     """
     Actual money collected grouped by receipt payment month.
     """
-    receipts = _apply_receipt_filters(Receipt.objects.all(), request)
-
+    receipts = _active_receipt_queryset(request)
+    
     qs = (
         receipts
         .annotate(month=TruncMonth("payment_date"))
@@ -187,7 +204,7 @@ def revenue_summary(request):
     """
     Actual collected revenue from receipts.
     """
-    receipts = _apply_receipt_filters(Receipt.objects.all(), request)
+    receipts = _active_receipt_queryset(request)
     total = receipts.aggregate(total=Sum("amount_paid"))["total"] or 0
 
     return Response({
@@ -211,8 +228,8 @@ def dashboard_summary(request):
     if property_number:
         leases = leases.filter(unit__property__property_number=property_number)
         
-    invoices = _apply_invoice_filters(Invoice.objects.all(), request)
-    receipts = _apply_receipt_filters(Receipt.objects.all(), request)
+    invoices = _active_invoice_queryset(request)
+    receipts = _active_receipt_queryset(request)
 
     total_properties = properties.count()
     total_units = units.count()
@@ -270,8 +287,8 @@ def dashboard_summary(request):
 
 @api_view(["GET"])
 def invoice_receipt_comparison(request):
-    invoices = _apply_invoice_filters(Invoice.objects.filter(lease__is_active=True,lease__tenant__is_active=True), request)
-    receipts = _apply_receipt_filters(Receipt.objects.all(), request)
+    invoices = _active_invoice_queryset(request)
+    receipts = _active_receipt_queryset(request)
 
     total_invoiced = invoices.aggregate(total=Sum("amount"))["total"] or 0
     total_received = receipts.aggregate(total=Sum("amount_paid"))["total"] or 0
