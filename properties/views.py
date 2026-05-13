@@ -137,11 +137,27 @@ class LeaseViewSet(viewsets.ModelViewSet):
             unit.save()
 
 
+from decimal import Decimal
+from django.db.models import Sum
+from django.utils import timezone
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from .models import Property, Unit, Tenant, Lease
+from billing.models import Invoice, Receipt
+
+
 class DashboardView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         user = request.user
+
+        today = timezone.now().date()
+
+        current_month = today.month
+        current_year = today.year
 
         properties = Property.objects.filter(owner=user)
 
@@ -155,7 +171,7 @@ class DashboardView(APIView):
 
         active_tenants = Tenant.objects.filter(
             property__in=properties,
-            is_active=True
+            is_active=True,
         )
 
         invoices = Invoice.objects.filter(
@@ -166,40 +182,83 @@ class DashboardView(APIView):
             invoice__lease__in=active_leases
         )
 
+        # CURRENT MONTH INVOICES
+        current_month_invoices = invoices.filter(
+            due_date__year=current_year,
+            due_date__month=current_month,
+        )
+
+        # CURRENT MONTH RECEIPTS
+        current_month_receipts = receipts.filter(
+            payment_date__year=current_year,
+            payment_date__month=current_month,
+        )
+
+        # EXPECTED RENT THIS MONTH
+        expected_rent = current_month_invoices.aggregate(
+            total=Sum("amount")
+        )["total"] or Decimal("0")
+
+        # COLLECTED THIS MONTH
+        collected_this_month = current_month_receipts.aggregate(
+            total=Sum("amount_paid")
+        )["total"] or Decimal("0")
+
+        # CURRENT MONTH ARREARS
+        current_month_arrears = Decimal("0")
+
+        current_unpaid = current_month_invoices.filter(
+            status__in=["unpaid", "partial", "past_due"]
+        )
+
+        for invoice in current_unpaid:
+            balance = invoice.balance()
+            if balance > 0:
+                current_month_arrears += Decimal(balance)
+
+        # HISTORICAL ARREARS
+        historical_arrears = Decimal("0")
+
+        historical_invoices = invoices.filter(
+            due_date__lt=today
+        ).exclude(
+            due_date__year=current_year,
+            due_date__month=current_month,
+        ).filter(
+            status__in=["unpaid", "partial", "past_due"]
+        )
+
+        for invoice in historical_invoices:
+            balance = invoice.balance()
+            if balance > 0:
+                historical_arrears += Decimal(balance)
+
         property_count = properties.count()
 
         total_units = units.count()
 
-        occupied_units = units.filter(is_occupied=True).count()
+        occupied_units = units.filter(
+            is_occupied=True
+        ).count()
 
         tenant_count = active_tenants.count()
-
-        expected_rent = invoices.aggregate(
-            total=Sum("amount")
-        )["total"] or 0
-
-        collected = receipts.aggregate(
-            total=Sum("amount_paid")
-        )["total"] or 0
-
-        unpaid_invoices = invoices.filter(
-            status__in=["unpaid", "partial", "past_due"]
-        )
-
-        arrears = sum(inv.balance() for inv in unpaid_invoices)
 
         occupancy_rate = (
             round((occupied_units / total_units) * 100, 2)
             if total_units > 0 else 0
         )
 
-        data = {
+        return Response({
             "properties": property_count,
             "tenants": tenant_count,
-            "expected_rent_this_month": expected_rent,
-            "collected_this_month": collected,
-            "total_arrears": arrears,
-            "occupancy_rate_percent": occupancy_rate,
-        }
 
-        return Response(data)
+            "expected_rent_this_month": float(expected_rent),
+
+            "collected_this_month": float(collected_this_month),
+
+            "current_month_arrears": float(current_month_arrears),
+
+            "historical_arrears": float(historical_arrears),
+
+            "occupancy_rate_percent": occupancy_rate,
+        })
