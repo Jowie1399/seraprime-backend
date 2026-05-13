@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.db.models import Sum, Count, Q
-from django.db.models.functions import TruncMonth
+from django.db.models.functions import TruncMonth, TruncDay, TruncYear
 from django.utils.dateparse import parse_date
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -40,6 +40,14 @@ def _safe_date(value):
         return None
     return parse_date(value)
 
+def _get_group_trunc(group_by):
+    if group_by == "day":
+        return TruncDay
+
+    if group_by == "year":
+        return TruncYear
+
+    return TruncMonth
 
 def _apply_invoice_filters(qs, request):
     start_date = _safe_date(request.GET.get("start_date"))
@@ -129,51 +137,76 @@ def property_list(request):
 
 @api_view(["GET"])
 def rent_trend(request):
-    """
-    Billed rent trend grouped by invoice created month.
-    """
     invoices = _active_invoice_queryset(request)
+
+    group_by = request.GET.get("group_by", "month")
+    trunc_function = _get_group_trunc(group_by)
+
     qs = (
         invoices
-        .annotate(month=TruncMonth("created_at"))
-        .values("month")
+        .annotate(period=trunc_function("created_at"))
+        .values("period")
         .annotate(total=Sum("amount"))
-        .order_by("month")
+        .order_by("period")
     )
 
-    data = [
-        {
-            "month": item["month"].strftime("%b %Y"),
+    data = []
+
+    for item in qs:
+        if not item["period"]:
+            continue
+
+        if group_by == "day":
+            label = item["period"].strftime("%d %b")
+
+        elif group_by == "year":
+            label = item["period"].strftime("%Y")
+
+        else:
+            label = item["period"].strftime("%b %Y")
+
+        data.append({
+            "label": label,
             "total": float(item["total"] or 0),
-        }
-        for item in qs if item["month"]
-    ]
+        })
 
     return Response(data)
 
 
 @api_view(["GET"])
 def receipts_trend(request):
-    """
-    Actual money collected grouped by receipt payment month.
-    """
     receipts = _active_receipt_queryset(request)
-    
+
+    group_by = request.GET.get("group_by", "month")
+    trunc_function = _get_group_trunc(group_by)
+
     qs = (
         receipts
-        .annotate(month=TruncMonth("payment_date"))
-        .values("month")
+        .annotate(period=trunc_function("payment_date"))
+        .values("period")
         .annotate(total=Sum("amount_paid"))
-        .order_by("month")
+        .order_by("period")
     )
 
-    data = [
-        {
-            "month": item["month"].strftime("%b %Y"),
+    data = []
+
+    for item in qs:
+        if not item["period"]:
+            continue
+
+        if group_by == "day":
+            label = item["period"].strftime("%d %b")
+
+        elif group_by == "year":
+            label = item["period"].strftime("%Y")
+
+        else:
+            label = item["period"].strftime("%b %Y")
+
+        data.append({
+            "label": label,
             "total": float(item["total"] or 0),
-        }
-        for item in qs if item["month"]
-    ]
+        })
 
     return Response(data)
 
