@@ -45,7 +45,13 @@ class TenantViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"])
     def statement(self, request, pk=None):
+
         tenant = self.get_object()
+
+        active_lease = tenant.leases.filter(
+            is_active=True
+        ).first()
+
         invoices = [
             {
                 "invoice_id": inv.id,
@@ -58,9 +64,34 @@ class TenantViewSet(viewsets.ModelViewSet):
             for lease in tenant.leases.all()
             for inv in lease.invoices.all()
         ]
+
         return Response({
             "tenant": tenant.full_name,
+
             "wallet_balance": tenant.wallet_balance,
+
+            "current_arrears": tenant.total_arrears(),
+
+            "rent_amount":
+                active_lease.rent_amount
+                if active_lease else None,
+
+            "deposit_amount":
+                active_lease.deposit_amount
+                if active_lease else None,
+
+            "opening_arrears":
+                active_lease.opening_arrears
+                if active_lease else None,
+
+            "billing_start_date":
+                active_lease.billing_start_date
+                if active_lease else None,
+
+            "move_in_date":
+                active_lease.start_date
+                if active_lease else None,
+
             "invoices": invoices
         })
 
