@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from decimal import Decimal
 
+
 User = get_user_model()
 
 
@@ -45,8 +46,26 @@ class Tenant(models.Model):
             lease__tenant=self,
             status__in=["unpaid", "partial", "past_due"]
         )
-        return sum((inv.balance() for inv in invoices), Decimal("0.00"))
-    
+
+        invoice_balance = sum(
+            (inv.balance() for inv in invoices),
+            Decimal("0.00")
+        )
+
+        active_lease = self.leases.filter(
+            is_active=True
+        ).first()
+
+        opening_arrears = Decimal("0.00")
+
+        if active_lease:
+            opening_arrears = (
+                active_lease.opening_arrears
+                or Decimal("0.00")
+            )
+
+        return invoice_balance + opening_arrears
+        
     def __str__(self):
         return self.full_name
 
@@ -59,6 +78,15 @@ class Lease(models.Model):
     end_date = models.DateField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
     due_day = models.IntegerField(default=5)
+    billing_start_date = models.DateField( null=True, blank=True)
+    opening_arrears = models.DecimalField( max_digits=12, decimal_places=2, default=0)
+
+    deposit_amount=models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0
+    )
+    
 
     class Meta:
         constraints = [

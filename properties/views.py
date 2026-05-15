@@ -113,20 +113,45 @@ class LeaseViewSet(viewsets.ModelViewSet):
         unit.save()
 
     def perform_update(self, serializer):
-        old_lease = self.get_object()
-        new_unit = serializer.validated_data.get("unit", old_lease.unit)
 
-        if new_unit != old_lease.unit and Lease.objects.filter(unit=new_unit, is_active=True).exists():
-            raise ValidationError("This unit already has an active lease.")
+        old_lease = self.get_object()
+
+        old_unit = old_lease.unit
+
+        new_unit = serializer.validated_data.get(
+            "unit",
+            old_unit
+        )
+
+        if (
+            new_unit != old_unit and
+            Lease.objects.filter(
+                unit=new_unit,
+                is_active=True
+            ).exclude(
+                pk=old_lease.pk
+            ).exists()
+        ):
+
+            raise ValidationError(
+                "This unit already has an active lease."
+            )
 
         lease = serializer.save()
 
-        # Update occupancy
-        if old_lease.unit != new_unit:
-            if not Lease.objects.filter(unit=old_lease.unit, is_active=True).exists():
-                old_lease.unit.is_occupied = False
-                old_lease.unit.save()
-            new_unit.is_occupied = True
+        # old unit occupancy cleanup
+        if old_unit != new_unit:
+
+            old_unit.is_occupied = Lease.objects.filter(
+                unit=old_unit,
+                is_active=True
+            ).exclude(
+                pk=lease.pk
+            ).exists()
+
+            old_unit.save()
+
+            new_unit.is_occupied=True
             new_unit.save()
 
     def perform_destroy(self, instance):

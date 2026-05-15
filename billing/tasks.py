@@ -26,15 +26,20 @@ def generate_monthly_invoices_for_owner(owner_id):
     for lease in active_leases:
 
         # 🚫 Skip leases that haven’t started yet
-        if lease.start_date > today:
+        invoice_start = (
+            lease.billing_start_date
+            or lease.start_date
+        )
+
+        if invoice_start > today:
             continue
 
-        # 📅 Start from lease start month
         month_cursor = date(
-            lease.start_date.year,
-            lease.start_date.month,
+            invoice_start.year,
+            invoice_start.month,
             1
         )
+       
 
         # 🔁 Loop month-by-month until current month
         while month_cursor <= current_month_start:
@@ -61,12 +66,26 @@ def generate_monthly_invoices_for_owner(owner_id):
                     due_day
                 )
 
-                Invoice.objects.create(
-                    lease=lease,
-                    amount=lease.rent_amount,
-                    due_date=due_date,
+                amount = lease.rent_amount
+
+                first_invoice = (
+                    month_cursor.year == invoice_start.year
+                    and
+                    month_cursor.month == invoice_start.month
                 )
 
+                if first_invoice:
+                    amount += (
+                        lease.opening_arrears
+                        or 0
+                    )
+
+                Invoice.objects.create(
+                    lease=lease,
+                    amount=amount,
+                    due_date=due_date,
+                   )
+                
                 created_count += 1
 
             # ➡️ Move to next month

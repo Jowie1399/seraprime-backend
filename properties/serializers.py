@@ -90,5 +90,24 @@ class LeaseSerializer(serializers.ModelSerializer):
     unit_name = serializers.CharField(source="unit.name", read_only=True)
 
     class Meta:
-        model = Lease
-        fields = "__all__"
+        model=Lease
+        fields="__all__"
+
+    def validate(self, data):
+
+        start_date = data.get("start_date")
+
+        billing_start = data.get(
+            "billing_start_date"
+        )
+
+        if (
+            billing_start and
+            start_date and
+            billing_start < start_date
+        ):
+            raise serializers.ValidationError(
+                "Billing date cannot be before move in date"
+            )
+
+        return data
