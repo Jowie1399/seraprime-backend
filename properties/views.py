@@ -132,9 +132,19 @@ class LeaseViewSet(viewsets.ModelViewSet):
     serializer_class = LeaseSerializer
     permission_classes = [IsAuthenticated]
 
-    def get_queryset(self):
-        return Lease.objects.filter(unit__property__owner=self.request.user)
+    filter_backends = [DjangoFilterBackend]
 
+    filterset_fields = [
+        "tenant",
+        "unit",
+        "is_active"
+    ]
+
+    def get_queryset(self):
+        return Lease.objects.filter(
+            unit__property__owner=self.request.user
+        )
+        
     def perform_create(self, serializer):
         unit = serializer.validated_data["unit"]
         if Lease.objects.filter(unit=unit, is_active=True).exists():
