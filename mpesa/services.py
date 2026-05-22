@@ -99,8 +99,11 @@ def process_transaction(transaction_obj):
         if tenant_obj:
             invoice_obj = Invoice.objects.filter(
                 lease__tenant=tenant_obj,
-                status__in=["pending", "partial"]
-            ).order_by("created_at").first()
+                is_deleted=False,
+                lease__is_active=True,
+                lease__tenant__is_active=True,
+                status__in=["unpaid","partial","past_due"]
+            ).order_by("due_date").first()
             
             
     # =========================

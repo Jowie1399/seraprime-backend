@@ -44,7 +44,8 @@ class Tenant(models.Model):
 
         invoices = Invoice.objects.filter(
             lease__tenant=self,
-            status__in=["unpaid", "partial", "past_due"]
+            status__in=["unpaid", "partial", "past_due"],
+            is_deleted=False
         )
 
         invoice_balance = sum(

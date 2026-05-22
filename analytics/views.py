@@ -13,20 +13,35 @@ from django.utils import timezone
 
 def _active_invoice_queryset(request):
     invoices = Invoice.objects.filter(
-        lease__is_active=True,
-        lease__tenant__is_active=True,
+        is_deleted=False
+    ).select_related(
+        "lease",
+        "lease__tenant",
+        "lease__unit",
+        "lease__unit__property"
     )
 
-    return _apply_invoice_filters(invoices, request)
+    return _apply_invoice_filters(
+        invoices,
+        request
+    )
 
 
 def _active_receipt_queryset(request):
     receipts = Receipt.objects.filter(
-        invoice__lease__is_active=True,
-        invoice__lease__tenant__is_active=True,
+        invoice__is_deleted=False
+    ).select_related(
+        "invoice",
+        "invoice__lease",
+        "invoice__lease__tenant",
+        "invoice__lease__unit",
+        "invoice__lease__unit__property"
     )
 
-    return _apply_receipt_filters(receipts, request)
+    return _apply_receipt_filters(
+        receipts,
+        request
+    )
 
 def _filter_by_owner(queryset, request, property_lookup="property__owner"):
     user = request.user
@@ -59,9 +74,9 @@ def _apply_invoice_filters(qs, request):
     if property_number:
         qs = qs.filter(lease__unit__property__property_number=property_number)
     if start_date:
-        qs = qs.filter(created_at__date__gte=start_date)
+        qs = qs.filter(due_date__gte=start_date)
     if end_date:
-        qs = qs.filter(created_at__date__lte=end_date)
+        qs = qs.filter(due_date__date__lte=end_date)
 
     return qs
 
@@ -144,7 +159,7 @@ def rent_trend(request):
 
     qs = (
         invoices
-        .annotate(period=trunc_function("created_at"))
+        .annotate(period=trunc_function("due_date"))
         .values("period")
         .annotate(total=Sum("amount"))
         .order_by("period")
@@ -166,10 +181,10 @@ def rent_trend(request):
             label = item["period"].strftime("%b %Y")
 
         data.append({
-            "label": label,
-            "total": float(item["total"] or 0),
-        })
-
+                "month": label,
+                "label": label,
+                "total": float(item["total"] or 0),
+            })
     return Response(data)
 
 
@@ -204,6 +219,7 @@ def receipts_trend(request):
             label = item["period"].strftime("%b %Y")
 
         data.append({
+            "month": label,
             "label": label,
             "total": float(item["total"] or 0),
         })
@@ -251,7 +267,7 @@ def dashboard_summary(request):
     units = _apply_unit_filters(Unit.objects.all(), request)
     tenants = _apply_tenant_filters(Tenant.objects.all(), request)
     
-    leases = Lease.objects.all()
+    leases = Lease.objects.filter(tenant__is_active=True)
     if request.user and request.user.is_authenticated:
         leases = leases.filter(unit__property__owner=request.user)
     else:
@@ -282,7 +298,7 @@ def dashboard_summary(request):
     )
 
     arrears_total = Decimal("0")
-    arrears_invoices = invoices.filter(lease__is_active=True,lease__tenant__is_active=True,status__in=["unpaid", "partial", "past_due"]).select_related(
+    arrears_invoices = invoices.filter(status__in=["unpaid", "partial", "past_due"]).select_related(
         "lease", "lease__tenant", "lease__unit", "lease__unit__property"
     )
     for invoice in arrears_invoices:

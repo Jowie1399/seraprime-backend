@@ -22,7 +22,10 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = (
             Invoice.objects
-            .filter(lease__unit__property__owner=self.request.user)
+            .filter(lease__unit__property__owner=self.request.user,
+            is_deleted=False,
+            lease__is_active=True,
+            lease__tenant__is_active=True,)
             .select_related(
                 "lease",
                 "lease__tenant",
@@ -86,7 +89,10 @@ class ReceiptViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = (
             Receipt.objects
-            .filter(invoice__lease__unit__property__owner=self.request.user)
+            .filter(invoice__lease__unit__property__owner=self.request.user,
+            invoice__is_deleted=False,
+            invoice__lease__is_active=True,
+            invoice__lease__tenant__is_active=True,)
             .select_related(
                 "invoice",
                 "invoice__lease",

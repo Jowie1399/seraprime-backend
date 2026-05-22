@@ -46,6 +46,18 @@ class Invoice(models.Model):
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
+
+    is_deleted = models.BooleanField(default=False)
+
+    deleted_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+
+    def soft_delete(self):
+        self.is_deleted=True
+        self.deleted_at=timezone.now()
+        self.save()
     
     
 
@@ -53,11 +65,13 @@ class Invoice(models.Model):
 
     
     def total_paid(self):
+        if self.is_deleted:
+            return Decimal("0.00")
+
         return sum(
             (receipt.amount_paid for receipt in self.receipts.all()),
             Decimal("0.00")
         )
-
     def balance(self):
         return self.amount - Decimal(self.total_paid())
 

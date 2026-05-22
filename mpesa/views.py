@@ -296,7 +296,12 @@ class MpesaTransactionViewSet(viewsets.ModelViewSet):
             return Response({"error": "invoice_id is required"}, status=400)
 
         try:
-            invoice = Invoice.objects.get(id=invoice_id)
+            invoice = Invoice.objects.get(
+                    id=invoice_id,
+                    is_deleted=False,
+                    lease__is_active=True,
+                    lease__tenant__is_active=True
+                )
         except Invoice.DoesNotExist:
             return Response({"error": "Invalid invoice"}, status=404)
 

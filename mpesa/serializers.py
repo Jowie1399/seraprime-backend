@@ -11,7 +11,7 @@ class MpesaTransactionSerializer(serializers.ModelSerializer):
     property_number = serializers.CharField(source="property.property_number", read_only=True)
     unit_name = serializers.CharField(source="unit.name", read_only=True)
     tenant_name = serializers.CharField(source="tenant.full_name", read_only=True)
-    invoice_number = serializers.CharField(source="invoice.invoice_number", read_only=True)
+    invoice_number = serializers.CharField(source="invoice_number", read_only=True)
 
     class Meta:
         model = MpesaTransaction

@@ -18,6 +18,7 @@ def generate_monthly_invoices_for_owner(owner_id):
 
     active_leases = Lease.objects.filter(
         is_active=True,
+        tenant__is_active=True,
         unit__property__owner_id=owner_id
     )
 
@@ -39,6 +40,16 @@ def generate_monthly_invoices_for_owner(owner_id):
             invoice_start.month,
             1
         )
+        
+        existing_old = Invoice.objects.filter(
+            lease=lease,
+            due_date__lt=invoice_start,
+            is_deleted=False
+        )
+
+        for old_invoice in existing_old:
+            if old_invoice.total_paid() == 0:
+                old_invoice.soft_delete()
        
 
         # 🔁 Loop month-by-month until current month
@@ -49,6 +60,7 @@ def generate_monthly_invoices_for_owner(owner_id):
                 lease=lease,
                 due_date__year=month_cursor.year,
                 due_date__month=month_cursor.month,
+                is_deleted=False
             ).exists()
 
             if not exists:
@@ -100,12 +112,15 @@ def notify_past_due_invoices():
 
     past_due_invoices = Invoice.objects.filter(
         due_date__lt=today,
-        status__in=["unpaid", "partial"]
+        status__in=["unpaid", "partial"],
+        is_deleted=False,
+        lease__is_active=True,
+        lease__tenant__is_active=True
     )
 
     for invoice in past_due_invoices:
         invoice.status = "past_due"
-        invoice.save()
+        invoice.save(update_fields=["status"])
 
         owner = invoice.lease.unit.property.owner
 

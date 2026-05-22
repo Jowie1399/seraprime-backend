@@ -62,7 +62,7 @@ class TenantViewSet(viewsets.ModelViewSet):
                 "balance": inv.balance(),
             }
             for lease in tenant.leases.all()
-            for inv in lease.invoices.all()
+            for inv in lease.invoices.filter(is_deleted=False)
         ]
 
         return Response({
@@ -179,7 +179,23 @@ class LeaseViewSet(viewsets.ModelViewSet):
             )
 
         lease = serializer.save()
+        
+        old_billing = old_lease.billing_start_date
+        new_billing = lease.billing_start_date
 
+        if old_billing != new_billing:
+
+            Invoice.objects.filter(
+                lease=lease,
+                due_date__lt=new_billing,
+                is_deleted=False,
+                status__in=["unpaid","past_due"]
+            ).update(
+                is_deleted=True
+            )
+        
+        
+        
         # old unit occupancy cleanup
         if old_unit != new_unit:
 
@@ -241,7 +257,8 @@ class DashboardView(APIView):
         )
 
         invoices = Invoice.objects.filter(
-            lease__in=active_leases
+            lease__in=active_leases,
+            is_deleted=False
         )
 
         receipts = Receipt.objects.filter(
