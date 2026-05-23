@@ -64,6 +64,27 @@ def _get_group_trunc(group_by):
 
     return TruncMonth
 
+from datetime import datetime
+
+def determine_grouping(
+    start_date,
+    end_date
+):
+
+    if not start_date or not end_date:
+        return "month"
+
+    days=(end_date-start_date).days
+
+    if days<=60:
+        return "day"
+
+    if days<=730:
+        return "month"
+
+    return "year"
+
+
 def _apply_invoice_filters(qs, request):
     start_date = _safe_date(request.GET.get("start_date"))
     end_date = _safe_date(request.GET.get("end_date"))
@@ -76,7 +97,7 @@ def _apply_invoice_filters(qs, request):
     if start_date:
         qs = qs.filter(due_date__gte=start_date)
     if end_date:
-        qs = qs.filter(due_date__date__lte=end_date)
+        qs = qs.filter(due_date__lte=end_date)
 
     return qs
 
@@ -152,11 +173,37 @@ def property_list(request):
 
 @api_view(["GET"])
 def rent_trend(request):
-    invoices = _active_invoice_queryset(request)
+    invoices = _active_invoice_queryset(
+        request
+    )
 
-    group_by = request.GET.get("group_by", "month")
-    trunc_function = _get_group_trunc(group_by)
+    start_date = _safe_date(
+        request.GET.get(
+            "start_date"
+        )
+    )
 
+    end_date = _safe_date(
+        request.GET.get(
+            "end_date"
+        )
+    )
+
+    group_by = request.GET.get(
+        "group_by"
+    )
+
+    if not group_by:
+        group_by = determine_grouping(
+            start_date,
+            end_date
+        )
+
+    trunc_function = (
+        _get_group_trunc(
+            group_by
+        )
+    )
     qs = (
         invoices
         .annotate(period=trunc_function("due_date"))
@@ -192,8 +239,33 @@ def rent_trend(request):
 def receipts_trend(request):
     receipts = _active_receipt_queryset(request)
 
-    group_by = request.GET.get("group_by", "month")
-    trunc_function = _get_group_trunc(group_by)
+    start_date = _safe_date(
+    request.GET.get(
+        "start_date"
+    )
+    )
+
+    end_date = _safe_date(
+        request.GET.get(
+            "end_date"
+        )
+    )
+
+    group_by = request.GET.get(
+        "group_by"
+    )
+
+    if not group_by:
+        group_by = determine_grouping(
+            start_date,
+            end_date
+        )
+
+    trunc_function = (
+        _get_group_trunc(
+            group_by
+        )
+    )
 
     qs = (
         receipts
