@@ -112,9 +112,9 @@ def _apply_receipt_filters(qs, request):
     if property_number:
         qs = qs.filter(invoice__lease__unit__property__property_number=property_number)
     if start_date:
-        qs = qs.filter(payment_date__date__gte=start_date)
+        qs = qs.filter(payment_date__gte=start_date)
     if end_date:
-        qs = qs.filter(payment_date__date__lte=end_date)
+        qs = qs.filter(payment_date__lte=end_date)
 
     return qs
 
