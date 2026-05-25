@@ -144,13 +144,32 @@ def _apply_property_filters(qs, request):
     return qs
 
 
-def _apply_tenant_filters(qs, request):
-    property_number = request.GET.get("property_number")
+def _apply_tenant_filters(
+    qs,
+    request
+):
 
-    qs = _filter_by_owner(qs, request, "property__owner")
+    property_number=(
+        request.GET.get(
+        "property_number"
+    )
+    )
+
+    if request.user.is_authenticated:
+
+        qs=qs.filter(
+        leases__unit__property__owner=request.user
+        ).distinct()
+
+    else:
+        qs=qs.none()
 
     if property_number:
-        qs = qs.filter(property__property_number=property_number)
+
+        qs=qs.filter(
+        leases__unit__property__property_number=
+        property_number
+        )
 
     return qs
 
@@ -339,11 +358,20 @@ def dashboard_summary(request):
     units = _apply_unit_filters(Unit.objects.all(), request)
     tenants = _apply_tenant_filters(Tenant.objects.all(), request)
     
-    leases = Lease.objects.filter(tenant__is_active=True)
-    if request.user and request.user.is_authenticated:
-        leases = leases.filter(unit__property__owner=request.user)
+    leases=Lease.objects.filter(
+    is_active=True,
+    tenant__is_active=True
+    )
+
+    if request.user.is_authenticated:
+
+        leases=leases.filter(
+        unit__property__owner=request.user
+        )
+
     else:
-        leases = leases.none()
+
+        leases=leases.none()
 
     property_number = request.GET.get("property_number")
     if property_number:
@@ -374,9 +402,25 @@ def dashboard_summary(request):
         "lease", "lease__tenant", "lease__unit", "lease__unit__property"
     )
     for invoice in arrears_invoices:
-        balance = invoice.balance()
-        if balance and balance > 0:
-            arrears_total += Decimal(balance)
+
+        try:
+
+            balance=invoice.balance()
+
+            if balance and balance>0:
+
+                arrears_total+=Decimal(
+                balance
+                )
+
+        except Exception as e:
+
+            print(
+            "Invoice analytics error:",
+            e
+            )
+
+            continue
 
     occupancy_rate = 0
     if total_units > 0:
