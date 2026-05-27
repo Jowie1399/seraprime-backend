@@ -13,7 +13,9 @@ from django.utils import timezone
 
 def _active_invoice_queryset(request):
     invoices = Invoice.objects.filter(
-        is_deleted=False
+        is_deleted=False,
+        lease__is_active=True,
+        lease__tenant__is_active=True
     ).select_related(
         "lease",
         "lease__tenant",
@@ -29,7 +31,9 @@ def _active_invoice_queryset(request):
 
 def _active_receipt_queryset(request):
     receipts = Receipt.objects.filter(
-        invoice__is_deleted=False
+        invoice__is_deleted=False,
+        invoice__lease__is_active=True,
+        invoice__lease__tenant__is_active=True
     ).select_related(
         "invoice",
         "invoice__lease",
@@ -40,8 +44,8 @@ def _active_receipt_queryset(request):
 
     return _apply_receipt_filters(
         receipts,
-        request
-    )
+        request)
+    
 
 def _filter_by_owner(queryset, request, property_lookup="property__owner"):
     user = request.user
@@ -323,8 +327,12 @@ def occupancy_stats(request):
     units = _apply_unit_filters(Unit.objects.all(), request)
 
     total_units = units.count()
-    occupied = units.filter(is_occupied=True).count()
-    vacant = units.filter(is_occupied=False).count()
+    occupied = Lease.objects.filter(
+    is_active=True,
+    tenant__is_active=True,
+    unit__in=units
+).values("unit").distinct().count()
+    vacant = total_units - occupied
 
     occupancy_rate = 0
     if total_units > 0:
@@ -356,7 +364,11 @@ def revenue_summary(request):
 def dashboard_summary(request):
     properties = _apply_property_filters(Property.objects.all(), request)
     units = _apply_unit_filters(Unit.objects.all(), request)
-    tenants = _apply_tenant_filters(Tenant.objects.all(), request)
+    tenants = _apply_tenant_filters(
+    Tenant.objects.filter(
+        is_active=True
+    ),
+    request)
     
     leases=Lease.objects.filter(
     is_active=True,
@@ -382,9 +394,13 @@ def dashboard_summary(request):
 
     total_properties = properties.count()
     total_units = units.count()
-    occupied_units = units.filter(is_occupied=True).count()
-    vacant_units = units.filter(is_occupied=False).count()
-    active_tenants = tenants.filter(is_active=True).count()
+    occupied_units = Lease.objects.filter(
+    is_active=True,
+    tenant__is_active=True,
+    unit__in=units
+).values("unit").distinct().count()
+    vacant_units = total_units - occupied_units
+    active_tenants = tenants.count()
     active_leases = leases.filter(is_active=True).count()
 
     total_billed = invoices.aggregate(total=Sum("amount"))["total"] or Decimal("0")
