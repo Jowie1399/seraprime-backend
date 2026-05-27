@@ -252,9 +252,12 @@ class DashboardView(APIView):
         )
 
         active_tenants = Tenant.objects.filter(
-            property__in=properties,
             is_active=True,
-        )
+            leases__is_active=True,
+            leases__unit__property__owner=user
+        ).distinct()
+
+        tenant_count = active_tenants.count()
 
         invoices = Invoice.objects.filter(
             lease__in=active_leases,
@@ -324,7 +327,7 @@ class DashboardView(APIView):
             is_occupied=True
         ).count()
 
-        tenant_count = active_tenants.count()
+        
 
         occupancy_rate = (
             round((occupied_units / total_units) * 100, 2)

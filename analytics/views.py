@@ -330,8 +330,22 @@ def occupancy_stats(request):
     occupied = Lease.objects.filter(
     is_active=True,
     tenant__is_active=True,
-    unit__in=units
-).values("unit").distinct().count()
+    unit__property__owner=request.user
+)
+
+    property_number = request.GET.get(
+        "property_number"
+    )
+
+    if property_number:
+        occupied = occupied.filter(
+            unit__property__property_number=
+            property_number
+        )
+
+    occupied = occupied.values(
+        "unit"
+    ).distinct().count()
     vacant = total_units - occupied
 
     occupancy_rate = 0
@@ -394,14 +408,15 @@ def dashboard_summary(request):
 
     total_properties = properties.count()
     total_units = units.count()
-    occupied_units = Lease.objects.filter(
-    is_active=True,
-    tenant__is_active=True,
-    unit__in=units
-).values("unit").distinct().count()
+    active_occupied_units = leases.values(
+        "unit"
+    ).distinct()
+
+    occupied_units = active_occupied_units.count()
+
     vacant_units = total_units - occupied_units
     active_tenants = tenants.count()
-    active_leases = leases.filter(is_active=True).count()
+    active_leases = leases.count()
 
     total_billed = invoices.aggregate(total=Sum("amount"))["total"] or Decimal("0")
     total_collected = receipts.aggregate(total=Sum("amount_paid"))["total"] or Decimal("0")
